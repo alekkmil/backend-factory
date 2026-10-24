@@ -1,0 +1,63 @@
+{
+  "review": "Targeted independent EN draft repair recheck",
+  "date": "2026-10-23",
+  "fileKey": "lsTHyJpv7f3S3MABmEvX8l",
+  "status": "PASS_TARGETED_REPAIRS_WITH_STATED_LIMITS",
+  "supersedesForRecheckedItems": "EN-DRAFT-QA.json",
+  "scope": "Read-only check of repaired EN nodes, using Figma screenshots and node bounds/fills. No Figma edits. This does not replace full prototype, accessibility, responsive or production acceptance.",
+  "recheckedFindings": [
+    {
+      "id": "EN-VIS-01",
+      "result": "Repair confirmed by sampled rendering plus affected-node structure",
+      "evidence": [
+        "Desktop first route card 23:507 screenshot now visibly shows its original route map; image 23:508 uses a new static preview hash.",
+        "All eight mobile route-media nodes 23:829,23:838,23:847,23:856,23:865,23:874,23:883,23:892 have visible static-preview image fills with distinct hashes.",
+        "Mobile bottom carousel 23:905 screenshot visibly shows the first original photograph (23:906). Nodes 23:907 and 23:908 now intentionally remain hidden as other pending carousel states. They have static-preview fills rather than empty references."
+      ],
+      "correctionToInitialReview": "The Ferry bottom source media are photographs in a carousel, not partner logos. The initial report's 'partner GIF/logo' wording should not be interpreted as an instruction to replace those photographs with logos.",
+      "limit": "The desktop first map and mobile first carousel photograph were visually sampled. The remaining affected mobile media fills were structurally checked; every static poster was not independently rendered at full size in this targeted pass. GIF animation and carousel state transitions remain separate acceptance items."
+    },
+    {
+      "id": "EN-VIS-02",
+      "result": "PASS",
+      "evidence": "Screenshot of mobile Ferry hero 23:808 at its natural 390x570 size no longer exposes the cropped SHORT SEA NETWORK heading behind the live lead. The title, lead and CTA are readable, and the original map remains recognizable.",
+      "limit": "Map port labels remain part of the background image. This check is not a formal contrast-ratio certification or review of all narrower widths."
+    },
+    {
+      "id": "EN-VIS-03",
+      "result": "PASS",
+      "evidence": "All four desktop Home vehicle headings (23:372,23:376,23:380,23:384) now share height=58 and absolute y=1323. Their subtitle nodes (23:373,23:377,23:381,23:385) share absolute y=1389. Full title strings remain present.",
+      "limit": "This confirms the repaired desktop row dimensions and subtitle alignment; it does not mandate fixed heights for the mobile single-column stack."
+    }
+  ],
+  "additionalStatePresence": [
+    {
+      "nodeId": "29:770",
+      "name": "Home EN desktop slide 2",
+      "verified": "Frame exists and is visible; text contains With our help, CROSS BORDERS FOR LESS, the Frejus/Mont Blanc tunnel description, More Information, Send an Enquiry and 2 / 2."
+    },
+    {
+      "nodeId": "29:988",
+      "name": "Home EN mobile slide 2",
+      "verified": "Frame exists and is visible; matching second-slide copy and 2 / 2 are present."
+    },
+    {
+      "nodeId": "29:1120",
+      "name": "EN mobile menu open",
+      "verified": "Frame exists and is visible; Close, six navigation labels, both approved general phone numbers and cargo@skvltd.com are present."
+    }
+  ],
+  "reportedByImplementerNotIndependentlyClicked": [
+    "The first-three-page prototype has been wired.",
+    "Language actions target their paired Figma frames.",
+    "Other pages open the legacy reference with explicit pending-new-design context."
+  ],
+  "remainingLimits": [
+    "Only the affected repair areas and existence/copy of the newly supplied states were checked. Complete six-screen rendering was not redundantly repeated.",
+    "Second Home slide and menu state presence is verified structurally, not by a complete click-through or viewport screenshot review in this pass.",
+    "Two additional Ferry photo-carousel states remain intentionally hidden/pending. No complete carousel interaction claim is made.",
+    "Legacy-reference exits are not completed new Figma route-detail screens. Final full-site editable coverage remains separate work.",
+    "No real email delivery, Viber availability, external timetable currency, keyboard/screen-reader behavior, production behavior or user testing was performed."
+  ],
+  "newMaterialBlockersFound": []
+}

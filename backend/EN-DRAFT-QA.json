@@ -1,0 +1,167 @@
+{
+  "review": "Independent EN draft visual and structural QA",
+  "date": "2026-10-23",
+  "fileKey": "lsTHyJpv7f3S3MABmEvX8l",
+  "status": "CHANGES_REQUESTED_FOR_DRAFT_VISUAL_COMPLETENESS",
+  "scope": "Read-only inspection of six first-three-page EN Figma frames. No Figma nodes were edited. Link wiring is still being completed separately; unfinished route-detail screens are explicitly pending and are not treated as unexpected defects here.",
+  "sources": [
+    "../content/first-three-pages.json",
+    "../reference/client-decisions.json",
+    "Figma get_screenshot renders and read-only Plugin API node/text/bounds inspection"
+  ],
+  "screens": [
+    {
+      "id": "23:305",
+      "pageId": "2:5",
+      "name": "Home EN desktop",
+      "width": 1440,
+      "height": 3414,
+      "textNodes": 61,
+      "clippedDescendantBoundsFound": 0
+    },
+    {
+      "id": "23:457",
+      "pageId": "2:5",
+      "name": "Ferry overview EN desktop",
+      "width": 1440,
+      "height": 4992,
+      "textNodes": 58,
+      "clippedDescendantBoundsFound": 0
+    },
+    {
+      "id": "23:590",
+      "pageId": "2:5",
+      "name": "Turkey EN desktop",
+      "width": 1440,
+      "height": 1716,
+      "textNodes": 38,
+      "clippedDescendantBoundsFound": 0
+    },
+    {
+      "id": "23:669",
+      "pageId": "2:6",
+      "name": "Home EN mobile",
+      "width": 390,
+      "height": 5772,
+      "textNodes": 50,
+      "clippedDescendantBoundsFound": 0
+    },
+    {
+      "id": "23:796",
+      "pageId": "2:6",
+      "name": "Ferry overview EN mobile",
+      "width": 390,
+      "height": 6830,
+      "textNodes": 47,
+      "clippedDescendantBoundsFound": 0
+    },
+    {
+      "id": "23:911",
+      "pageId": "2:6",
+      "name": "Turkey EN mobile",
+      "width": 390,
+      "height": 2343,
+      "textNodes": 27,
+      "clippedDescendantBoundsFound": 0
+    }
+  ],
+  "findings": [
+    {
+      "id": "EN-VIS-01",
+      "priority": "P1",
+      "title": "Ferry route maps and partner GIFs render blank",
+      "frames": [
+        "23:457",
+        "23:796"
+      ],
+      "nodeIds": {
+        "desktopMaps": [
+          "23:508",
+          "23:517",
+          "23:526",
+          "23:535",
+          "23:544",
+          "23:553",
+          "23:562",
+          "23:571"
+        ],
+        "mobileMaps": [
+          "23:829",
+          "23:838",
+          "23:847",
+          "23:856",
+          "23:865",
+          "23:874",
+          "23:883",
+          "23:892"
+        ],
+        "desktopPartnerImages": [
+          "23:585",
+          "23:586",
+          "23:587"
+        ],
+        "mobilePartnerImages": [
+          "23:906",
+          "23:907",
+          "23:908"
+        ]
+      },
+      "observed": "All eight route-media slots and three bottom partner-media slots appear empty in the screenshots. IMAGE fills with hashes and visible=true are present. Desktop leaves the left half of every route card empty; mobile reserves 268 px per map and 120 px per partner image without visible media.",
+      "causeStatus": "GIF rendering/poster-frame issue is a hypothesis, not a proven root cause. Sample archived source GIFs have real dimensions and multiple frames (768x432; 57, 46 and 85 frames), so they are not one-pixel placeholders.",
+      "recommendation": "Inspect the source GIFs and select a verified representative nonblank still for each Figma image slot, preserving the original animated assets in the developer materials. Record any derived poster provenance and keep route/partner order.",
+      "acceptance": "Screenshots show all intended route maps and partner images on both EN viewports, with no empty reserved slots. If any asset genuinely remains unavailable, mark that exact slot as pending instead of presenting it as complete."
+    },
+    {
+      "id": "EN-VIS-02",
+      "priority": "P2",
+      "title": "Mobile Ferry hero exposes cropped embedded map heading behind live text",
+      "frames": [
+        "23:796"
+      ],
+      "nodeIds": [
+        "23:809",
+        "23:812"
+      ],
+      "nodeIdNote": "23:809 is the hero contrast overlay; 23:812 is its live heading accent. Resolve the background-bearing parent from this hero when fixing its image crop.",
+      "observed": "The map background's baked-in upper heading, visible as a cropped fragment ending in SHORT SEA NETWO..., crosses behind the live lead 'The most attractive prices'. The frame-boundary scan cannot catch this because the competing text is raster content.",
+      "recommendation": "Adjust the background crop/position or use a verified crop of the same original map that keeps the embedded heading outside the live text area. Keep the existing live EN copy and route graphic.",
+      "acceptance": "At 390 px, no embedded/cropped map headline competes with the live lead, heading or CTA; map context remains recognizable."
+    },
+    {
+      "id": "EN-VIS-03",
+      "priority": "P2",
+      "title": "Desktop vehicle-card subtitle alignment changes when the first heading wraps",
+      "frames": [
+        "23:305"
+      ],
+      "nodeIds": [
+        "23:372",
+        "23:373",
+        "23:376",
+        "23:377",
+        "23:380",
+        "23:381",
+        "23:384",
+        "23:385"
+      ],
+      "observed": "The first heading occupies 58 px while the other headings occupy 29 px. Its subtitle begins at y=1189; the other subtitles begin at y=1160. The four peer cards therefore do not maintain aligned title/subtitle rows despite the explicit consistent-sizing requirement.",
+      "recommendation": "Reserve a common two-line title area across this desktop card row and keep common icon/title/subtitle alignment. Let mobile remain content-driven in its single-column stack.",
+      "acceptance": "All four desktop title areas and subtitle starts align without truncating the full English heading. No unnecessary fixed mobile height is introduced."
+    }
+  ],
+  "passedObservations": [
+    "No descendant bounds extending beyond a clipsContent ancestor were found in the six frames; screenshots showed no text clipping or horizontal page overflow at the supplied widths.",
+    "Adjacent primary and secondary buttons have balanced dimensions in the inspected hero and Turkey sections; mobile full-width CTAs remain readable.",
+    "EN body copy and eight draft short ferry descriptions match the first-three-pages source in the visible states, allowing presentational capitalization and combined text nodes.",
+    "Turkey uses Gemport, Ambarli with the source dotless-i spelling, Patras and Bari; the Italy connection is explicitly via Greece in both directions. The contextual Turkey phone and cargo@skvltd.com are correct.",
+    "No Marebonus, deferred 10/6 frequency, growth block, Newsletter, Careers or invalid PDF/PPT controls were observed in these six frames.",
+    "The supplied legacy appearance, route order and full English labels are recognizable. View Timetable labels are preserved; their live schedule currency is not inferred from their presence."
+  ],
+  "knownPendingAndLimits": [
+    "Home is the visible first slide (1/2); the source's second tunnel slide is not contained in these six frame states. This review does not claim complete slider-state coverage.",
+    "The Ferry source includes carousel arrows/count; the supplied draft uses a partner-image row. Final carousel behavior/state coverage remains part of interaction handoff, not a tested result here.",
+    "Mobile menu-open, actual BG switching, actions, scroll anchors, quote/contact forms and unfinished route-detail screens were not interaction-tested while wiring is in progress.",
+    "Viber availability, external schedule accuracy, accessibility contrast ratios, keyboard behavior and responsive widths other than 1440/390 are not certified by this visual review.",
+    "This is expert inspection of draft artifacts, not a real-user test or production acceptance. Findings describe the inspected snapshot and must be rechecked after relevant fixes."
+  ]
+}

@@ -1,0 +1,53 @@
+generator client {
+  provider     = "prisma-client"
+  output       = "../src/generated/prisma"
+  moduleFormat = "cjs"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model Enquiry {
+  id                   String              @id @default(uuid()) @db.Uuid
+  requestId            String              @unique @db.Uuid
+  kind                 String              @db.VarChar(20)
+  locale               String              @db.VarChar(2)
+  sourcePath           String              @db.VarChar(300)
+  routeContext         Json?
+  encryptedFields      String              @db.Text
+  payloadHash          String              @db.VarChar(64)
+  idempotencyKeyHash   String?             @unique @db.VarChar(64)
+  idempotencyExpiresAt DateTime?           @db.Timestamptz(3)
+  retentionUntil       DateTime?           @db.Timestamptz(3)
+  createdAt            DateTime            @default(now()) @db.Timestamptz(3)
+  notificationOutbox   NotificationOutbox?
+}
+
+model NotificationOutbox {
+  id                String    @id @default(uuid()) @db.Uuid
+  requestId         String    @unique @db.Uuid
+  status            String    @default("pending") @db.VarChar(32)
+  attemptCount      Int       @default(0)
+  nextAttemptAt     DateTime  @default(now()) @db.Timestamptz(3)
+  leaseUntil        DateTime? @db.Timestamptz(3)
+  providerMessageId String?   @db.VarChar(255)
+  lastErrorCode     String?   @db.VarChar(100)
+  createdAt         DateTime  @default(now()) @db.Timestamptz(3)
+  updatedAt         DateTime  @updatedAt @db.Timestamptz(3)
+  enquiry           Enquiry   @relation(fields: [requestId], references: [requestId], onDelete: Restrict)
+
+  @@index([status, nextAttemptAt])
+  @@index([status, leaseUntil])
+}
+
+model EnquiryRateLimitBucket {
+  keyHash     String   @db.VarChar(64)
+  bucketType  String   @db.VarChar(8)
+  windowStart DateTime @db.Timestamptz(3)
+  count       Int      @default(0)
+  expiresAt   DateTime @db.Timestamptz(3)
+
+  @@id([keyHash, bucketType, windowStart])
+  @@index([expiresAt])
+}

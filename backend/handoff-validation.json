@@ -1,0 +1,77 @@
+{
+  "date": "2026-10-23",
+  "scope": "Static artifact checks only. No application, AWS, email, live URLs or Figma tested. Limited schema assertions are not a full OpenAPI conformance validator.",
+  "checks": [
+    {
+      "name": "OpenAPI internal references",
+      "pass": true,
+      "evidence": "19 internal references resolved"
+    },
+    {
+      "name": "Valid payload shape examples",
+      "pass": true,
+      "evidence": "Contact, Ferry, proposed Tunnel; no submissions sent, runtime registry checks not exercised"
+    },
+    {
+      "name": "Invalid payload shape examples",
+      "pass": true,
+      "evidence": "Seven cases: recipient, company, cargo, date, tunnel enum, source path, excessive field length"
+    },
+    {
+      "name": "Unified endpoint recipient and cache policy",
+      "pass": true,
+      "evidence": "Fixed server-side recipient; all documented responses no-store; unsupported-method policy explicit"
+    },
+    {
+      "name": "Historical URL coverage",
+      "pass": true,
+      "evidence": "83 exact URL strings match baseline"
+    },
+    {
+      "name": "Additional and new URL coverage",
+      "pass": true,
+      "evidence": "83 historical +18 additional including 11 queries +2 Turkey =103"
+    },
+    {
+      "name": "Pending rule guard",
+      "pass": true,
+      "evidence": "All proposed 410 and pending redirects remain nondeployable"
+    },
+    {
+      "name": "Marebonus separation",
+      "pass": true,
+      "evidence": "Five content removals have independent pending HTTP decisions; no Turkey target"
+    },
+    {
+      "name": "Sitemap candidate pairs",
+      "pass": true,
+      "evidence": "30 reciprocal candidates, not published or immutable final sitemap"
+    },
+    {
+      "name": "HTML structure and local links",
+      "pass": true,
+      "evidence": "Three English documents, one H1 each, linked files exist. Package must preserve or rewrite provenance links."
+    },
+    {
+      "name": "Media evidence",
+      "pass": true,
+      "evidence": "146 exact references with SHA256; final public mapping and rights remain pending"
+    },
+    {
+      "name": "Acceptance identifiers",
+      "pass": true,
+      "evidence": "28 unique future implementation checks, not falsely marked passed"
+    }
+  ],
+  "result": "PASS",
+  "artifactHashes": {
+    "backend/content-model.json": "de3130f03cadad3ea0bc7c4e62779e1bceacc4134beca9d7fb2eb0eca80994c3",
+    "backend/forms-api.openapi.json": "1182f6cbd93542b405db8af383df6fef13b30c59a7f26b1d28468989171e1982",
+    "backend/HANDOFF.html": "bf77917a6826be72d858e112c0e60f19db382a599c5482e318a719b92568bb9b",
+    "migration/acceptance.json": "398421ee4729fc5ce31f3cb6f898e92d96f805ff47fc97f318286ff6659749f4",
+    "migration/media-url-evidence.json": "db057f90bc527f43a55ebfcd73514f1720a6adb6b4bc6ba0f17000a64a16c549",
+    "migration/SEO-AND-LAUNCH.html": "e0c1611aca578430341dd2f657ad04c7828daacad875a96619f95c1a7b9bd9c3",
+    "migration/url-matrix.html": "34199cc1a0418f85d265c2367c73ae649c3efb623ffb7b415ffdd7ee1c5d1661",
+    "migration/url-matrix.json": "d1af3e8e4cb60175e2c4dbffd34c97d49dbb6fa56ebb3fd65cd91dbb62d2b817"
+  }
+}

@@ -1,0 +1,233 @@
+{
+  "status": "Proposed vendor-neutral schema; approved business rules are explicitly identified.",
+  "editorial_default": "BG-led content, structured blocks, separate localized records, full EN coverage, versioned release snapshot. No WordPress runtime or arbitrary page-builder HTML.",
+  "entities": {
+    "Page": {
+      "fields": [
+        "id immutable UUID",
+        "legacyIds[]",
+        "type home|ferry-index|route|tunnel|about|contact|request",
+        "sectionOrder[] immutable section IDs",
+        "routeId optional",
+        "sourceRefs[]",
+        "decisionRefs[]",
+        "revision"
+      ],
+      "unique": [
+        "id"
+      ]
+    },
+    "PageLocale": {
+      "fields": [
+        "pageId",
+        "locale bg|en|it",
+        "domainId",
+        "path exact legacy spelling",
+        "title",
+        "description",
+        "localizedSections[]",
+        "translationStatus missing|draft|review|current|stale",
+        "sourceBgRevision",
+        "status draft|review|approved|published|archived",
+        "publishedRevision",
+        "contentChangedAt",
+        "indexable",
+        "publishedAt nullable ISO8601 UTC with recorded provenance; never a build clock",
+        "firstPublishedOnNewSiteAt nullable ISO8601 UTC assigned once on actual public activation",
+        "dateStatus legacy_dates_recorded|legacy_publication_unverified|new_awaiting_first_publication",
+        "datePolicyId",
+        "dateEvidence historical WordPress/public API values with confidence and source",
+        "publicationRule",
+        "modificationRule"
+      ],
+      "unique": [
+        "domainId+path",
+        "pageId+locale"
+      ],
+      "gate": "Published BG/EN releases have equal required section IDs/order/form schema and current translations. Drafts never fall back silently to another public language.",
+      "dateContract": "../migration/PAGE-DATES.html",
+      "dateImport": "Import each language-specific dates object from content-package.json. publishedAt/contentChangedAt/firstPublishedOnNewSiteAt map directly; status maps to dateStatus, policyId to datePolicyId, historicalEvidence to dateEvidence. The date status records provenance, independently of editorial publication status.",
+      "dateGate": "Unknown legacy publication remains null. New pages receive actual successful first public activation time once. Existing publication is preserved. contentChangedAt is nullable before first publication and changes only for a substantive accepted public revision; JSON-LD and sitemap read that same persisted value."
+    },
+    "Section": {
+      "fields": [
+        "id",
+        "pageId",
+        "type hero|text|route-card-grid|image|faq|contact|enquiry-entry",
+        "shared facts",
+        "localized text/alt",
+        "mediaIds[]",
+        "actionIds[]",
+        "sourceRef",
+        "copyApprovalStatus"
+      ],
+      "restriction": "Only approved block types; no scripts/raw HTML embeds. Preserve existing page/route order unless specifically approved."
+    },
+    "Route": {
+      "fields": [
+        "id",
+        "overviewOrder",
+        "pageId",
+        "countryIds[]",
+        "ports[] with source/status",
+        "connectionNotes",
+        "contactProfileId",
+        "scheduleLink optional with verifiedAt/source",
+        "operatingFacts[] with evidence/approval"
+      ],
+      "approved_turkey": [
+        "Gemport",
+        "Ambarli",
+        "Patras",
+        "Patras–Bari connection via Greece in both directions"
+      ],
+      "blocked_facts": [
+        "10/6 frequencies",
+        "unconfirmed growth figures",
+        "invented fares or direct Turkey–Italy sailing"
+      ]
+    },
+    "ContactProfile": {
+      "approved": {
+        "reservations": [
+          {
+            "phone": "+359890407007",
+            "channel": "WhatsApp"
+          },
+          {
+            "phone": "+359887779959",
+            "channel": "Viber",
+            "verification": "pending"
+          }
+        ],
+        "turkeyPhone": "+359892296080",
+        "visibleEmail": "cargo@skvltd.com"
+      },
+      "restriction": "Mail recipients are server configuration, not public CMS/user input. Viber must not be marked verified before a real availability/deep-link check."
+    },
+    "MediaAsset": {
+      "fields": [
+        "id",
+        "sourcePath/sourceUrl",
+        "sourceSha256",
+        "objectKey",
+        "mime",
+        "bytes",
+        "width/height",
+        "rights/source",
+        "locale",
+        "alt/caption by locale",
+        "embeddedTextReview",
+        "variantOf",
+        "approvedUse",
+        "verifiedAt"
+      ],
+      "restriction": "Only sanitized public assets, no source SQL/backups/client data. Record meaningful text in route schedule images separately for BG/EN equivalence."
+    },
+    "Navigation": {
+      "fields": [
+        "id",
+        "locale",
+        "orderedItems[] each pageId/actionId",
+        "revision"
+      ],
+      "approved_removals": [
+        "empty Latest News",
+        "nonfunctional Newsletter",
+        "Careers",
+        "invalid PDF/PPT buttons"
+      ],
+      "restriction": "Keep working route schedule links. UI deletion does not retire historical URLs."
+    },
+    "Action": {
+      "fields": [
+        "id",
+        "kind internal|tel|mailto|external|enquiry",
+        "pageId/fragment or verified destination",
+        "routeContext",
+        "label by locale",
+        "verificationStatus"
+      ],
+      "restriction": "Internal destinations resolve by registry, never unchecked URLs. No javascript/data URL. No recipient selection from route context."
+    },
+    "Enquiry": {
+      "fields": [
+        "requestId",
+        "kind",
+        "locale",
+        "sourcePath",
+        "validated routeContext",
+        "encrypted validated fields",
+        "payloadHash",
+        "idempotencyKeyHash",
+        "createdAt",
+        "processingStatus",
+        "retentionUntil"
+      ],
+      "restriction": "Private operational data, not public CMS content. No raw payload in analytics/logs."
+    },
+    "NotificationOutbox": {
+      "fields": [
+        "id",
+        "requestId unique",
+        "status pending|sending|provider-accepted|delivered|delayed|bounced|failed|unknown",
+        "attemptCount",
+        "nextAttemptAt",
+        "providerMessageId optional",
+        "lastErrorCode",
+        "createdAt"
+      ],
+      "restriction": "Persist atomically with enquiry. Email delivery is not a reservation confirmation. Ambiguous provider failures must not be called exactly-once."
+    },
+    "RedirectDecision": {
+      "fields": [
+        "id",
+        "sourceHost",
+        "sourcePath",
+        "semanticQuery",
+        "proposedAction",
+        "approvedAction optional",
+        "target optional",
+        "statusCode optional",
+        "evidenceRefs[]",
+        "owner",
+        "decisionDate",
+        "testId"
+      ],
+      "gate": "Pending retire/redirect rows are excluded from generated deployment rules."
+    },
+    "Release": {
+      "fields": [
+        "id",
+        "contentRevision",
+        "BG/EN manifest hashes",
+        "asset manifest hash",
+        "URL decision revision",
+        "build/image digest",
+        "approver",
+        "publishedAt",
+        "rollbackReleaseId"
+      ],
+      "gate": "No stale EN, missing media, unreviewed copy or unresolved required migration rule in a production release."
+    }
+  },
+  "workflow": [
+    "Editor drafts BG change with source/decision reference.",
+    "Shared section/field/fact changes mark EN stale.",
+    "Translator updates all affected text, image text/alt and messages; no fresh authorization needed for ordinary translation.",
+    "Reviewer checks copy, facts, BG/EN parity and route/action targets in protected preview.",
+    "Publisher approves a versioned paired content snapshot; publish webhook triggers signed CI job or explicit release.",
+    "Build validates snapshots; production stays on the prior accepted snapshot on failure.",
+    "Emergency rollback restores matching content + app + media + URL versions; do not overwrite newly accepted enquiries."
+  ],
+  "roles": {
+    "editor": "draft content and upload approved asset types",
+    "translator": "edit EN localization",
+    "reviewer": "approve copy/parity/facts",
+    "publisher": "publish accepted release",
+    "administrator": "manage schema/users/config; separate least-privilege account"
+  },
+  "cms_proposal": "Prefer a headless CMS backed by structured collections and revisioned exports. Directus is a candidate because official docs cover translation collections and content versions; exact license, pinned version, roles and approval controls must be verified in implementation. Keep this portable model if another CMS satisfies the same checks. Git-only JSON is not the default editor experience.",
+  "public_content_contract": "Next server/build reads only approved release snapshots through a server-side CMS token or signed private object; CMS admin and draft APIs are not anonymously exposed.",
+  "it_preparation": "DomainLocale model supports separate .it domain and translated slugs. Ownership/domain/content remain pending. No public /it fallback or empty IT sitemap/hreflang."
+}

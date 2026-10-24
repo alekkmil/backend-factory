@@ -1,0 +1,679 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "SKV Cargo Enquiries API — proposed implementation contract",
+    "version": "1.0.0",
+    "description": "Canonical contract agreed with the frontend handoff. Specification only; no endpoint is implemented by this artifact. D02/D03: all submissions are delivered server-side to cargo@skvltd.com. Contact/Ferry field requirements follow BG source definitions; Tunnel fields are a proposal. No auto-reply, file upload, payment, booking confirmation or public enquiry lookup is included."
+  },
+  "servers": [
+    {
+      "url": "/",
+      "description": "Same-origin deployment; staging must not send to real recipients without an explicitly authorized delivery test."
+    }
+  ],
+  "paths": {
+    "/api/enquiries": {
+      "post": {
+        "operationId": "submitEnquiry",
+        "summary": "Durably accept a Contact, Ferry or Tunnel enquiry",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "Generate once per logical submission. Retain on network error/timeout/retry. New key only for intentionally new or edited submission; 24-hour deduplication window is proposed."
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Enquiry"
+              },
+              "example": {
+                "kind": "contact",
+                "locale": "en",
+                "sourcePath": "/en/about/contacts/",
+                "fields": {
+                  "contactName": "Example person",
+                  "company": "Example company",
+                  "email": "person@example.com",
+                  "message": "Illustrative content only; do not send."
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Enquiry and outbox atomically persisted. Not mail delivery or a confirmed reservation. Replay of the same key/payload returns the same requestId.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Accepted"
+                },
+                "example": {
+                  "requestId": "example-request-id",
+                  "status": "accepted"
+                }
+              }
+            },
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Malformed JSON or invalid envelope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Origin or spam policy rejected request; no accepted success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Same idempotency key with different payload",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Request body exceeds 16 KiB",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "Only application/json is accepted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Field validation failed; fieldErrors use canonical field IDs",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit; Retry-After seconds supplied",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer",
+                  "minimum": 1
+                }
+              },
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Cannot durably accept request; retry with same key",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            }
+          }
+        },
+        "security": []
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "ContactFields": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "contactName": {
+            "type": "string",
+            "maxLength": 200,
+            "minLength": 1
+          },
+          "company": {
+            "type": "string",
+            "maxLength": 250,
+            "minLength": 1
+          },
+          "email": {
+            "type": "string",
+            "maxLength": 254,
+            "minLength": 1,
+            "format": "email"
+          },
+          "subject": {
+            "type": "string",
+            "maxLength": 200
+          },
+          "message": {
+            "type": "string",
+            "maxLength": 5000
+          }
+        },
+        "required": [
+          "contactName",
+          "company",
+          "email"
+        ]
+      },
+      "FerryFields": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "ferryLine": {
+            "type": "string",
+            "maxLength": 500,
+            "minLength": 1
+          },
+          "departureDate": {
+            "type": "string",
+            "maxLength": 10,
+            "minLength": 1,
+            "format": "date"
+          },
+          "registrationNumbers": {
+            "type": "string",
+            "maxLength": 100,
+            "minLength": 1
+          },
+          "driverName": {
+            "type": "string",
+            "maxLength": 200,
+            "minLength": 1
+          },
+          "cargoTypes": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 3,
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "enum": [
+                "refrigerated",
+                "normal",
+                "adr"
+              ]
+            }
+          },
+          "contactName": {
+            "type": "string",
+            "maxLength": 200,
+            "minLength": 1
+          },
+          "company": {
+            "type": "string",
+            "maxLength": 250,
+            "minLength": 1
+          },
+          "email": {
+            "type": "string",
+            "maxLength": 254,
+            "minLength": 1,
+            "format": "email"
+          },
+          "additionalInformation": {
+            "type": "string",
+            "maxLength": 5000
+          }
+        },
+        "required": [
+          "ferryLine",
+          "departureDate",
+          "registrationNumbers",
+          "driverName",
+          "cargoTypes",
+          "contactName",
+          "company",
+          "email"
+        ]
+      },
+      "TunnelFields": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "tunnelId": {
+            "type": "string",
+            "enum": [
+              "frejus",
+              "mont-blanc",
+              "not-sure"
+            ]
+          },
+          "contactName": {
+            "type": "string",
+            "maxLength": 200,
+            "minLength": 1
+          },
+          "company": {
+            "type": "string",
+            "maxLength": 250,
+            "minLength": 1
+          },
+          "email": {
+            "type": "string",
+            "maxLength": 254,
+            "minLength": 1,
+            "format": "email"
+          },
+          "travelDate": {
+            "type": "string",
+            "maxLength": 10,
+            "format": "date"
+          },
+          "vehicleDetails": {
+            "type": "string",
+            "maxLength": 1000
+          },
+          "message": {
+            "type": "string",
+            "maxLength": 5000
+          }
+        },
+        "required": [
+          "tunnelId",
+          "contactName",
+          "company",
+          "email"
+        ],
+        "description": "Proposed field set, not individually client-approved. Enquiry entry replacing calculator is approved (D05)."
+      },
+      "RouteContext": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "pageId": {
+            "type": "string",
+            "maxLength": 100
+          },
+          "routeId": {
+            "type": "string",
+            "maxLength": 100
+          },
+          "tunnelId": {
+            "type": "string",
+            "enum": [
+              "frejus",
+              "mont-blanc",
+              "not-sure"
+            ]
+          }
+        },
+        "required": []
+      },
+      "ContactEnquiry": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "type": "string",
+            "const": "contact"
+          },
+          "locale": {
+            "type": "string",
+            "enum": [
+              "bg",
+              "en"
+            ]
+          },
+          "sourcePath": {
+            "type": "string",
+            "maxLength": 300,
+            "minLength": 1,
+            "pattern": "^/(?!/)[^?#]*$"
+          },
+          "routeContext": {
+            "$ref": "#/components/schemas/RouteContext"
+          },
+          "fields": {
+            "$ref": "#/components/schemas/ContactFields"
+          },
+          "antiSpamToken": {
+            "type": "string",
+            "maxLength": 4096
+          }
+        },
+        "required": [
+          "kind",
+          "locale",
+          "sourcePath",
+          "fields"
+        ]
+      },
+      "FerryEnquiry": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "type": "string",
+            "const": "ferry"
+          },
+          "locale": {
+            "type": "string",
+            "enum": [
+              "bg",
+              "en"
+            ]
+          },
+          "sourcePath": {
+            "type": "string",
+            "maxLength": 300,
+            "minLength": 1,
+            "pattern": "^/(?!/)[^?#]*$"
+          },
+          "routeContext": {
+            "$ref": "#/components/schemas/RouteContext"
+          },
+          "fields": {
+            "$ref": "#/components/schemas/FerryFields"
+          },
+          "antiSpamToken": {
+            "type": "string",
+            "maxLength": 4096
+          }
+        },
+        "required": [
+          "kind",
+          "locale",
+          "sourcePath",
+          "fields"
+        ]
+      },
+      "TunnelEnquiry": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "type": "string",
+            "const": "tunnel"
+          },
+          "locale": {
+            "type": "string",
+            "enum": [
+              "bg",
+              "en"
+            ]
+          },
+          "sourcePath": {
+            "type": "string",
+            "maxLength": 300,
+            "minLength": 1,
+            "pattern": "^/(?!/)[^?#]*$"
+          },
+          "routeContext": {
+            "$ref": "#/components/schemas/RouteContext"
+          },
+          "fields": {
+            "$ref": "#/components/schemas/TunnelFields"
+          },
+          "antiSpamToken": {
+            "type": "string",
+            "maxLength": 4096
+          }
+        },
+        "required": [
+          "kind",
+          "locale",
+          "sourcePath",
+          "fields"
+        ]
+      },
+      "Enquiry": {
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/ContactEnquiry"
+          },
+          {
+            "$ref": "#/components/schemas/FerryEnquiry"
+          },
+          {
+            "$ref": "#/components/schemas/TunnelEnquiry"
+          }
+        ],
+        "discriminator": {
+          "propertyName": "kind",
+          "mapping": {
+            "contact": "#/components/schemas/ContactEnquiry",
+            "ferry": "#/components/schemas/FerryEnquiry",
+            "tunnel": "#/components/schemas/TunnelEnquiry"
+          }
+        }
+      },
+      "Accepted": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "requestId": {
+            "type": "string",
+            "maxLength": 100,
+            "minLength": 1
+          },
+          "status": {
+            "type": "string",
+            "const": "accepted"
+          }
+        },
+        "required": [
+          "requestId",
+          "status"
+        ]
+      },
+      "Error": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "code": {
+            "type": "string",
+            "enum": [
+              "invalid_request",
+              "method_not_allowed",
+              "validation_failed",
+              "origin_rejected",
+              "spam_rejected",
+              "challenge_required",
+              "idempotency_conflict",
+              "payload_too_large",
+              "unsupported_media_type",
+              "rate_limited",
+              "service_unavailable"
+            ]
+          },
+          "requestId": {
+            "type": "string",
+            "maxLength": 100
+          },
+          "fieldErrors": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "enum": [
+                  "required",
+                  "too_long",
+                  "invalid_email",
+                  "invalid_date",
+                  "invalid_choice",
+                  "invalid_context"
+                ]
+              }
+            }
+          }
+        },
+        "required": [
+          "code"
+        ]
+      }
+    }
+  },
+  "x-approved-recipient": "cargo@skvltd.com",
+  "x-client-controlled-recipient": false,
+  "x-method-policy": {
+    "allowed": [
+      "POST"
+    ],
+    "otherMethodsStatus": 405,
+    "errorCode": "method_not_allowed",
+    "allowHeader": "POST",
+    "headResponse": "No response body, as required by HTTP HEAD semantics.",
+    "crossOriginPreflight": "No cross-origin access is enabled."
+  },
+  "x-max-body-bytes": 16384,
+  "x-validation": [
+    "Trim strings; reject whitespace-only required fields.",
+    "Validate real calendar dates, not regex only. Never insert an archived/default departure date.",
+    "Server allowlists sourcePath/pageId/routeId/tunnelId against the public registry and checks coherent context; clients cannot select a recipient.",
+    "Do not impose a country-specific name/registration regex or convert multi-select cargo to radio buttons.",
+    "Optional empty fields are omitted or accepted as empty strings; optional date values are omitted when empty.",
+    "No unconditional marketing/privacy consent field is added to the preserved BG forms; any required acknowledgement depends on the approved notice and is a separately versioned UI/API change.",
+    "Origin check, shared rate limiting and spam validation run before persistence. A token is required only when an explicitly configured challenge policy requests it."
+  ],
+  "x-source-field-mapping": {
+    "contact": {
+      "source_form_id": "2507",
+      "fields": {
+        "your-name": "contactName",
+        "your-company": "company",
+        "your-email": "email",
+        "your-subject": "subject",
+        "your-message": "message"
+      }
+    },
+    "ferry": {
+      "source_form_id": "3919",
+      "fields": {
+        "1": "ferryLine",
+        "2": "departureDate",
+        "3": "registrationNumbers",
+        "4": "driverName",
+        "5": "cargoTypes",
+        "6": "company",
+        "7": "contactName",
+        "8": "email",
+        "9": "additionalInformation"
+      },
+      "EN_rule": "Uses BG required fields; company remains required and driverName is one string."
+    },
+    "tunnel": {
+      "source": "D05 approves entry point, not this detailed field list",
+      "status": "proposed"
+    }
+  },
+  "x-state-model": [
+    "editing",
+    "validating",
+    "submitting",
+    "accepted",
+    "validation_error",
+    "retryable_error",
+    "blocked"
+  ],
+  "x-example-not-for-submission": true
+}
