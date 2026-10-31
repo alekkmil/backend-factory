@@ -1,5 +1,24 @@
 # BackendFactory
 
+## skv-web-api
+
+The NestJS application lives in `apps/skv-web-api` and listens on port 3001
+by default. Its liveness endpoint is `GET /api/health`.
+
+Copy `apps/skv-web-api/.env.example` to `apps/skv-web-api/.env`, then start
+its local PostgreSQL database (host port 5433):
+
+```sh
+docker compose -f apps/skv-web-api/docker-compose.yml --env-file apps/skv-web-api/.env up -d
+npx nx serve skv-web-api
+```
+
+Use `npx nx build skv-web-api` to build. Prisma targets are
+`prisma-generate`, `prisma-validate`, `prisma-migrate-dev`, and
+`prisma-migrate-deploy`; for example, `npx nx run skv-web-api:prisma-generate`.
+Builds generate the application-local Prisma Client automatically.
+The example credentials are for local development only.
+
 <a alt="Nx logo" href="https://nx.dev" target="_blank" rel="noreferrer"><img src="https://raw.githubusercontent.com/nrwl/nx/master/images/nx-logo.png" width="45"></a>
 
 ✨ Your new, shiny [Nx workspace](https://nx.dev) is ready ✨.

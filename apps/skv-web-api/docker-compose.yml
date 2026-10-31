@@ -1,0 +1,22 @@
+name: skv-web-api
+
+services:
+  db:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-skv_web_api}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-local_only_change_me}
+      POSTGRES_DB: ${POSTGRES_DB:-skv_web_api_db}
+    ports:
+      - '${POSTGRES_PORT:-5433}:5432'
+    volumes:
+      - skv_web_api_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U "$$POSTGRES_USER" -d "$$POSTGRES_DB"']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  skv_web_api_postgres_data:

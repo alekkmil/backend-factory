@@ -1,0 +1,109 @@
+{
+  "name": "skv-web-api",
+  "$schema": "../../node_modules/nx/schemas/project-schema.json",
+  "sourceRoot": "apps/skv-web-api/src",
+  "projectType": "application",
+  "tags": [],
+  "targets": {
+    "build": {
+      "dependsOn": [
+        "^build",
+        "prisma-generate"
+      ]
+    },
+    "prisma-generate": {
+      "executor": "nx:run-commands",
+      "cache": true,
+      "outputs": [
+        "{projectRoot}/src/generated/prisma"
+      ],
+      "options": {
+        "cwd": "{workspaceRoot}",
+        "command": "npx prisma generate --config apps/skv-web-api/prisma.config.ts",
+        "env": {
+          "DATABASE_URL": "postgresql://generate:generate@localhost:5432/skv_web_api?schema=public"
+        }
+      }
+    },
+    "prisma-validate": {
+      "executor": "nx:run-commands",
+      "options": {
+        "cwd": "{workspaceRoot}",
+        "command": "npx prisma validate --config apps/skv-web-api/prisma.config.ts",
+        "env": {
+          "DATABASE_URL": "postgresql://generate:generate@localhost:5432/skv_web_api?schema=public"
+        }
+      }
+    },
+    "prisma-migrate-dev": {
+      "executor": "nx:run-commands",
+      "options": {
+        "cwd": "{workspaceRoot}",
+        "command": "npx prisma migrate dev --config apps/skv-web-api/prisma.config.ts",
+        "forwardAllArgs": true
+      }
+    },
+    "prisma-migrate-deploy": {
+      "executor": "nx:run-commands",
+      "options": {
+        "cwd": "{workspaceRoot}",
+        "command": "npx prisma migrate deploy --config apps/skv-web-api/prisma.config.ts",
+        "forwardAllArgs": true
+      }
+    },
+    "prune-lockfile": {
+      "dependsOn": [
+        "build"
+      ],
+      "cache": true,
+      "executor": "@nx/js:prune-lockfile",
+      "outputs": [
+        "{workspaceRoot}/dist/apps/skv-web-api/package.json",
+        "{workspaceRoot}/dist/apps/skv-web-api/package-lock.json"
+      ],
+      "options": {
+        "buildTarget": "build"
+      }
+    },
+    "copy-workspace-modules": {
+      "dependsOn": [
+        "build"
+      ],
+      "cache": true,
+      "outputs": [
+        "{workspaceRoot}/dist/apps/skv-web-api/workspace_modules"
+      ],
+      "executor": "@nx/js:copy-workspace-modules",
+      "options": {
+        "buildTarget": "build"
+      }
+    },
+    "prune": {
+      "dependsOn": [
+        "prune-lockfile",
+        "copy-workspace-modules"
+      ],
+      "executor": "nx:noop"
+    },
+    "serve": {
+      "continuous": true,
+      "executor": "@nx/js:node",
+      "defaultConfiguration": "development",
+      "dependsOn": [
+        "build"
+      ],
+      "options": {
+        "buildTarget": "skv-web-api:build",
+        "runBuildTargetDependencies": false
+      },
+      "configurations": {
+        "development": {
+          "buildTarget": "skv-web-api:build:development"
+        },
+        "production": {
+          "buildTarget": "skv-web-api:build:production"
+        }
+      }
+    }
+  }
+}

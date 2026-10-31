@@ -39,6 +39,7 @@ testem.log
 Thumbs.db
 
 .env
+/apps/skv-web-api/src/generated/prisma/
 
 .nx/cache
 .nx/workspace-data
