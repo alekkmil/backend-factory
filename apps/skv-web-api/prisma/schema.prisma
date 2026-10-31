@@ -7,3 +7,1040 @@ generator client {
 datasource db {
   provider = "postgresql"
 }
+
+enum Locale {
+  bg
+  en
+}
+
+enum ProductType {
+  jewellery
+  loose_stone
+}
+
+enum PublicationStatus {
+  draft
+  published
+  hidden
+}
+
+enum SalesMode {
+  direct_purchase
+  enquiry_only
+  archive_catalogue
+}
+
+enum PriceVisibility {
+  visible
+  hidden
+}
+
+enum CompositionState {
+  unknown
+  none
+  known
+}
+
+enum StockStatus {
+  available
+  reserved
+  in_transit
+  blocked
+  sold
+}
+
+enum LocationCode {
+  sofia
+  nessebar
+}
+
+enum FulfilmentMethod {
+  delivery
+  store_pickup
+}
+
+enum DeliveryScope {
+  bulgaria
+  selected_localities
+}
+
+enum RestrictionReason {
+  damage
+  data_check
+  management_decision
+  other
+}
+
+enum SaleChannel {
+  online
+  store
+}
+
+enum PrincipalKind {
+  staff
+  coordinator_mailbox
+  service
+}
+
+enum Permission {
+  catalogue_read
+  catalogue_edit
+  catalogue_publish
+  media_review
+  stock_fact_write
+  payment_fact_write
+  grant_reissue
+}
+
+enum MediaRole {
+  main
+  angle
+  back_profile
+  detail
+  on_body
+  original
+  editorial
+}
+
+enum ReviewStatus {
+  draft
+  rework
+  approved
+}
+
+enum RevisionState {
+  draft
+  published
+  superseded
+}
+
+enum RouteState {
+  current
+  redirect
+  gone
+}
+
+enum ContentType {
+  home
+  hub
+  selection
+  knowledge
+  service
+  article
+  case_study
+  press
+  author
+  guide
+  faq
+  contact
+}
+
+enum PolicyKind {
+  delivery_returns
+  terms
+  privacy
+  cookies
+  accessibility
+}
+
+enum ImportState {
+  validated
+  invalid
+  committed
+  partially_committed
+}
+
+enum ImportRowState {
+  ready
+  invalid
+  committed
+}
+
+enum PaymentTiming {
+  prepayment
+  on_receipt
+}
+
+enum AttemptState {
+  pending
+  committed
+  rejected
+}
+
+enum OrderStatus {
+  received
+  confirmed
+}
+
+enum LineDecision {
+  pending
+  accept
+  do_not_accept
+}
+
+enum CheckStatus {
+  pending
+  confirmed
+  unavailable
+}
+
+enum PaymentStatus {
+  pending
+  failed
+  succeeded
+}
+
+enum GrantScope {
+  customer_read
+  coordinator_process
+}
+
+enum InquiryType {
+  general
+  callback
+  similar_jewellery_creation
+}
+
+enum JobKind {
+  ops_order_received
+  customer_payment_received
+  customer_order_confirmed
+  customer_order_access
+  coordinator_access
+  customer_access_lookup
+  inquiry_received
+  cache_invalidate
+  stock_fact_changed
+}
+
+enum JobStatus {
+  pending
+  sent
+  failed
+  suppressed
+}
+
+model Principal {
+  id                                 String             @id @default(uuid()) @db.Uuid
+  externalSubject                    String             @db.VarChar(255)
+  kind                               PrincipalKind
+  displayName                        String             @db.VarChar(255)
+  permissions                        Permission[]       @default([])
+  enabled                            Boolean            @default(true)
+  createdAt                          DateTime           @default(now()) @db.Timestamptz(3)
+  updatedAt                          DateTime           @updatedAt @db.Timestamptz(3)
+  from_MediaRelease_reviewedById     MediaRelease[]     @relation("MediaRelease_reviewedById")
+  from_ProductRevision_createdById   ProductRevision[]  @relation("ProductRevision_createdById")
+  from_MediaAsset_reviewedById       MediaAsset[]       @relation("MediaAsset_reviewedById")
+  from_StockSale_recordedById        StockSale[]        @relation("StockSale_recordedById")
+  from_ImportBatch_actorId           ImportBatch[]      @relation("ImportBatch_actorId")
+  from_OrderLine_decidedById         OrderLine[]        @relation("OrderLine_decidedById")
+  from_StoreCheck_checkedById        StoreCheck[]       @relation("StoreCheck_checkedById")
+  from_Acceptance_acceptedById       Acceptance[]       @relation("Acceptance_acceptedById")
+  from_PaymentOperation_recordedById PaymentOperation[] @relation("PaymentOperation_recordedById")
+  from_AccessGrant_principalId       AccessGrant[]      @relation("AccessGrant_principalId")
+  from_AuditEvent_actorId            AuditEvent[]       @relation("AuditEvent_actorId")
+
+  @@unique([externalSubject])
+}
+
+model DictionaryEntry {
+  id                                   String             @id @default(uuid()) @db.Uuid
+  group                                String             @db.VarChar(40)
+  code                                 String             @db.VarChar(80)
+  labelBg                              String             @db.VarChar(255)
+  labelEn                              String             @db.VarChar(255)
+  appliesTo                            String[]           @default([])
+  active                               Boolean            @default(true)
+  createdAt                            DateTime           @default(now()) @db.Timestamptz(3)
+  updatedAt                            DateTime           @updatedAt @db.Timestamptz(3)
+  from_ProductRevision_jewelleryTypeId ProductRevision[]  @relation("ProductRevision_jewelleryTypeId")
+  from_RevisionMaterial_materialId     RevisionMaterial[] @relation("RevisionMaterial_materialId")
+  from_RevisionMaterial_finenessId     RevisionMaterial[] @relation("RevisionMaterial_finenessId")
+  from_RevisionMaterial_goldKaratId    RevisionMaterial[] @relation("RevisionMaterial_goldKaratId")
+  from_RevisionGemstone_gemstoneId     RevisionGemstone[] @relation("RevisionGemstone_gemstoneId")
+
+  @@unique([group, code])
+}
+
+model Store {
+  code                             LocationCode  @id
+  publicData                       Json
+  createdAt                        DateTime      @default(now()) @db.Timestamptz(3)
+  updatedAt                        DateTime      @updatedAt @db.Timestamptz(3)
+  from_StockItem_locationCode      StockItem[]   @relation("StockItem_locationCode")
+  from_StockItem_transferTo        StockItem[]   @relation("StockItem_transferTo")
+  from_StockSale_storeCode         StockSale[]   @relation("StockSale_storeCode")
+  from_ContentLink_targetStoreCode ContentLink[] @relation("ContentLink_targetStoreCode")
+  from_OrderLine_reservedLocation  OrderLine[]   @relation("OrderLine_reservedLocation")
+  from_Inquiry_storeCode           Inquiry[]     @relation("Inquiry_storeCode")
+  from_StoreCheck_locationCode     StoreCheck[]  @relation("StoreCheck_locationCode")
+}
+
+model ShopSettings {
+  id                        Int           @id @default(1)
+  version                   Int           @default(1)
+  currency                  String        @db.VarChar(3)
+  allowedProductTypes       ProductType[] @default([])
+  allowedJewelleryTypeCodes String[]      @default([])
+  maxOnlinePrice            Decimal?      @db.Decimal(12, 2)
+  paymentMethods            Json
+  deliveryFeeRules          Json
+  siteContacts              Json
+  cookieConfig              Json
+  coordinatorEmail          String?       @db.VarChar(320)
+  ready                     Boolean       @default(false)
+  createdAt                 DateTime      @default(now()) @db.Timestamptz(3)
+  updatedAt                 DateTime      @updatedAt @db.Timestamptz(3)
+}
+
+model GuestSession {
+  id                               String              @id @default(uuid()) @db.Uuid
+  tokenHash                        String              @db.VarChar(64)
+  expiresAt                        DateTime            @db.Timestamptz(3)
+  revokedAt                        DateTime?           @db.Timestamptz(3)
+  createdAt                        DateTime            @default(now()) @db.Timestamptz(3)
+  from_Quote_guestId               Quote[]             @relation("Quote_guestId")
+  from_Order_guestId               Order[]             @relation("Order_guestId")
+  from_SubmissionAttempt_guestId   SubmissionAttempt[] @relation("SubmissionAttempt_guestId")
+  from_Inquiry_guestId             Inquiry[]           @relation("Inquiry_guestId")
+  from_AccessGrant_redeemedGuestId AccessGrant[]       @relation("AccessGrant_redeemedGuestId")
+  from_AccessSession_guestId       AccessSession[]     @relation("AccessSession_guestId")
+  from_AuditEvent_guestId          AuditEvent[]        @relation("AuditEvent_guestId")
+  from_AccessLookup_guestId        AccessLookup[]      @relation("AccessLookup_guestId")
+
+  @@unique([tokenHash])
+  @@index([expiresAt])
+}
+
+model Product {
+  id                                       String               @id @default(uuid()) @db.Uuid
+  ssgId                                    String               @db.VarChar(40)
+  publicUrlId                              BigInt               @unique @default(autoincrement())
+  productType                              ProductType
+  publicationStatus                        PublicationStatus    @default(draft)
+  currentRevisionId                        String?              @unique @db.Uuid
+  version                                  Int                  @default(1)
+  isLegacyMigration                        Boolean              @default(false)
+  createdAt                                DateTime             @default(now()) @db.Timestamptz(3)
+  updatedAt                                DateTime             @updatedAt @db.Timestamptz(3)
+  currentRevisionIdRelation                ProductRevision?     @relation("Product_currentRevisionId", fields: [currentRevisionId], references: [id], onDelete: Restrict)
+  from_MediaRelease_productId              MediaRelease[]       @relation("MediaRelease_productId")
+  from_ProductRevision_productId           ProductRevision[]    @relation("ProductRevision_productId")
+  from_LegacyReference_productId           LegacyReference[]    @relation("LegacyReference_productId")
+  from_PublicRoute_productId               PublicRoute[]        @relation("PublicRoute_productId")
+  from_BarcodeIdentity_productId           BarcodeIdentity[]    @relation("BarcodeIdentity_productId")
+  from_StockItem_productId                 StockItem[]          @relation("StockItem_productId")
+  from_ContentLink_targetProductId         ContentLink[]        @relation("ContentLink_targetProductId")
+  from_ImportProductRow_productId          ImportProductRow[]   @relation("ImportProductRow_productId")
+  from_QuoteLine_productId                 QuoteLine[]          @relation("QuoteLine_productId")
+  from_OrderLine_productId                 OrderLine[]          @relation("OrderLine_productId")
+  from_Inquiry_productId                   Inquiry[]            @relation("Inquiry_productId")
+  from_ProductRelatedLink_productId        ProductRelatedLink[] @relation("ProductRelatedLink_productId")
+  from_ProductRelatedLink_relatedProductId ProductRelatedLink[] @relation("ProductRelatedLink_relatedProductId")
+
+  @@unique([ssgId])
+  @@index([publicationStatus, productType])
+}
+
+model MediaRelease {
+  id                                  String            @id @default(uuid()) @db.Uuid
+  productId                           String            @db.Uuid
+  versionLabel                        String            @db.VarChar(30)
+  approved                            Boolean           @default(false)
+  reviewedById                        String?           @db.Uuid
+  reviewedAt                          DateTime?         @db.Timestamptz(3)
+  receiptSha256                       String?           @db.VarChar(64)
+  createdAt                           DateTime          @default(now()) @db.Timestamptz(3)
+  productIdRelation                   Product           @relation("MediaRelease_productId", fields: [productId], references: [id], onDelete: Restrict)
+  reviewedByIdRelation                Principal?        @relation("MediaRelease_reviewedById", fields: [reviewedById], references: [id], onDelete: Restrict)
+  from_ProductRevision_mediaReleaseId ProductRevision[] @relation("ProductRevision_mediaReleaseId")
+  from_MediaAsset_releaseId           MediaAsset[]      @relation("MediaAsset_releaseId")
+
+  @@unique([productId, versionLabel])
+}
+
+model ProductRevision {
+  id                                 String               @id @default(uuid()) @db.Uuid
+  productId                          String               @db.Uuid
+  revisionNumber                     Int
+  state                              RevisionState        @default(draft)
+  jewelleryTypeId                    String?              @db.Uuid
+  materialsState                     CompositionState     @default(unknown)
+  gemstonesState                     CompositionState     @default(unknown)
+  salesMode                          SalesMode            @default(enquiry_only)
+  priceVisibility                    PriceVisibility      @default(hidden)
+  fulfilmentMethods                  FulfilmentMethod[]   @default([])
+  deliveryScope                      DeliveryScope?
+  deliveryLocalityIds                String[]             @default([])
+  pickupLocationCodes                LocationCode[]       @default([])
+  mediaReleaseId                     String?              @db.Uuid
+  changeReason                       RestrictionReason?
+  changeNote                         String?              @db.VarChar(2000)
+  createdById                        String               @db.Uuid
+  createdAt                          DateTime             @default(now()) @db.Timestamptz(3)
+  publishedAt                        DateTime?            @db.Timestamptz(3)
+  productIdRelation                  Product              @relation("ProductRevision_productId", fields: [productId], references: [id], onDelete: Restrict)
+  jewelleryTypeIdRelation            DictionaryEntry?     @relation("ProductRevision_jewelleryTypeId", fields: [jewelleryTypeId], references: [id], onDelete: Restrict)
+  mediaReleaseIdRelation             MediaRelease?        @relation("ProductRevision_mediaReleaseId", fields: [mediaReleaseId], references: [id], onDelete: Restrict)
+  createdByIdRelation                Principal            @relation("ProductRevision_createdById", fields: [createdById], references: [id], onDelete: Restrict)
+  from_Product_currentRevisionId     Product?             @relation("Product_currentRevisionId")
+  from_ProductTranslation_revisionId ProductTranslation[] @relation("ProductTranslation_revisionId")
+  from_RevisionMaterial_revisionId   RevisionMaterial[]   @relation("RevisionMaterial_revisionId")
+  from_RevisionGemstone_revisionId   RevisionGemstone[]   @relation("RevisionGemstone_revisionId")
+  from_RevisionImage_revisionId      RevisionImage[]      @relation("RevisionImage_revisionId")
+
+  @@unique([productId, revisionNumber])
+  @@index([productId, state])
+}
+
+model MediaAsset {
+  id                         String          @id @default(uuid()) @db.Uuid
+  releaseId                  String?         @db.Uuid
+  logicalImageId             String          @db.VarChar(80)
+  role                       MediaRole
+  originalPrivatePath        String?         @db.VarChar(1000)
+  derivatives                Json
+  altBg                      String?         @db.VarChar(500)
+  altEn                      String?         @db.VarChar(500)
+  processedWithAi            Boolean         @default(false)
+  onModelIllustrative        Boolean         @default(false)
+  reviewStatus               ReviewStatus    @default(draft)
+  reviewedById               String?         @db.Uuid
+  reviewedAt                 DateTime?       @db.Timestamptz(3)
+  createdAt                  DateTime        @default(now()) @db.Timestamptz(3)
+  releaseIdRelation          MediaRelease?   @relation("MediaAsset_releaseId", fields: [releaseId], references: [id], onDelete: Restrict)
+  reviewedByIdRelation       Principal?      @relation("MediaAsset_reviewedById", fields: [reviewedById], references: [id], onDelete: Restrict)
+  from_RevisionImage_assetId RevisionImage[] @relation("RevisionImage_assetId")
+  from_QuoteLine_assetId     QuoteLine[]     @relation("QuoteLine_assetId")
+  from_OrderLine_assetId     OrderLine[]     @relation("OrderLine_assetId")
+
+  @@unique([releaseId, logicalImageId])
+}
+
+model ProductTranslation {
+  id                  String          @id @default(uuid()) @db.Uuid
+  revisionId          String          @db.Uuid
+  locale              Locale
+  name                String?         @db.VarChar(250)
+  description         String?         @db.Text
+  slug                String?         @db.VarChar(180)
+  firstPublishedAt    DateTime?       @db.Timestamptz(3)
+  firstPublishedDate  String?         @db.VarChar(10)
+  publicationEvidence String?         @db.VarChar(1000)
+  publicModifiedAt    DateTime?       @db.Timestamptz(3)
+  revisionIdRelation  ProductRevision @relation("ProductTranslation_revisionId", fields: [revisionId], references: [id], onDelete: Restrict)
+
+  @@unique([revisionId, locale])
+}
+
+model RevisionMaterial {
+  id                  String           @id @default(uuid()) @db.Uuid
+  revisionId          String           @db.Uuid
+  materialId          String           @db.Uuid
+  finenessId          String?          @db.Uuid
+  goldKaratId         String?          @db.Uuid
+  revisionIdRelation  ProductRevision  @relation("RevisionMaterial_revisionId", fields: [revisionId], references: [id], onDelete: Restrict)
+  materialIdRelation  DictionaryEntry  @relation("RevisionMaterial_materialId", fields: [materialId], references: [id], onDelete: Restrict)
+  finenessIdRelation  DictionaryEntry? @relation("RevisionMaterial_finenessId", fields: [finenessId], references: [id], onDelete: Restrict)
+  goldKaratIdRelation DictionaryEntry? @relation("RevisionMaterial_goldKaratId", fields: [goldKaratId], references: [id], onDelete: Restrict)
+
+  @@index([revisionId])
+}
+
+model RevisionGemstone {
+  id                 String          @id @default(uuid()) @db.Uuid
+  revisionId         String          @db.Uuid
+  gemstoneId         String          @db.Uuid
+  revisionIdRelation ProductRevision @relation("RevisionGemstone_revisionId", fields: [revisionId], references: [id], onDelete: Restrict)
+  gemstoneIdRelation DictionaryEntry @relation("RevisionGemstone_gemstoneId", fields: [gemstoneId], references: [id], onDelete: Restrict)
+
+  @@unique([revisionId, gemstoneId])
+}
+
+model RevisionImage {
+  id                 String          @id @default(uuid()) @db.Uuid
+  revisionId         String          @db.Uuid
+  assetId            String          @db.Uuid
+  sortOrder          Int
+  revisionIdRelation ProductRevision @relation("RevisionImage_revisionId", fields: [revisionId], references: [id], onDelete: Restrict)
+  assetIdRelation    MediaAsset      @relation("RevisionImage_assetId", fields: [assetId], references: [id], onDelete: Restrict)
+
+  @@unique([revisionId, assetId])
+  @@unique([revisionId, sortOrder])
+}
+
+model LegacyReference {
+  id                 String   @id @default(uuid()) @db.Uuid
+  productId          String   @db.Uuid
+  sourceSystem       String   @db.VarChar(80)
+  legacyId           String   @db.VarChar(255)
+  urlBg              String?  @db.VarChar(2000)
+  urlEn              String?  @db.VarChar(2000)
+  historicalPrice    Decimal? @db.Decimal(12, 2)
+  historicalCurrency String?  @db.VarChar(3)
+  sourceRef          String   @db.VarChar(2000)
+  createdAt          DateTime @default(now()) @db.Timestamptz(3)
+  productIdRelation  Product  @relation("LegacyReference_productId", fields: [productId], references: [id], onDelete: Restrict)
+
+  @@unique([sourceSystem, legacyId])
+  @@index([productId])
+}
+
+model ContentRecord {
+  id                                String               @id @default(uuid()) @db.Uuid
+  type                              ContentType
+  key                               String               @db.VarChar(120)
+  parentId                          String?              @db.Uuid
+  authorId                          String?              @db.Uuid
+  specialData                       Json
+  createdAt                         DateTime             @default(now()) @db.Timestamptz(3)
+  updatedAt                         DateTime             @updatedAt @db.Timestamptz(3)
+  parentIdRelation                  ContentRecord?       @relation("ContentRecord_parentId", fields: [parentId], references: [id], onDelete: Restrict)
+  authorIdRelation                  ContentRecord?       @relation("ContentRecord_authorId", fields: [authorId], references: [id], onDelete: Restrict)
+  from_ContentRecord_parentId       ContentRecord[]      @relation("ContentRecord_parentId")
+  from_ContentRecord_authorId       ContentRecord[]      @relation("ContentRecord_authorId")
+  from_PublicRoute_contentId        PublicRoute[]        @relation("PublicRoute_contentId")
+  from_ContentTranslation_contentId ContentTranslation[] @relation("ContentTranslation_contentId")
+  from_ContentLink_ownerContentId   ContentLink[]        @relation("ContentLink_ownerContentId")
+  from_ContentLink_targetContentId  ContentLink[]        @relation("ContentLink_targetContentId")
+  from_Inquiry_contentId            Inquiry[]            @relation("Inquiry_contentId")
+
+  @@unique([key])
+  @@index([type, parentId])
+}
+
+model PublicRoute {
+  id                String         @id @default(uuid()) @db.Uuid
+  path              String         @db.VarChar(1000)
+  locale            Locale
+  state             RouteState
+  productId         String?        @db.Uuid
+  contentId         String?        @db.Uuid
+  changedAt         DateTime       @db.Timestamptz(3)
+  createdAt         DateTime       @default(now()) @db.Timestamptz(3)
+  productIdRelation Product?       @relation("PublicRoute_productId", fields: [productId], references: [id], onDelete: Restrict)
+  contentIdRelation ContentRecord? @relation("PublicRoute_contentId", fields: [contentId], references: [id], onDelete: Restrict)
+
+  @@unique([path])
+  @@index([productId, locale])
+  @@index([contentId, locale])
+}
+
+model BarcodeIdentity {
+  barcode                String     @id @db.VarChar(128)
+  productId              String     @db.Uuid
+  createdAt              DateTime   @default(now()) @db.Timestamptz(3)
+  productIdRelation      Product    @relation("BarcodeIdentity_productId", fields: [productId], references: [id], onDelete: Restrict)
+  from_StockItem_barcode StockItem? @relation("StockItem_barcode")
+
+  @@index([productId])
+}
+
+model StockItem {
+  id                         String          @id @default(uuid()) @db.Uuid
+  productId                  String          @db.Uuid
+  barcode                    String          @db.VarChar(128)
+  locationCode               LocationCode
+  status                     StockStatus
+  price                      Decimal?        @db.Decimal(12, 2)
+  currency                   String?         @db.VarChar(3)
+  weightG                    Decimal?        @db.Decimal(12, 3)
+  stoneWeightCt              Decimal?        @db.Decimal(12, 3)
+  dimensions                 Json?
+  transferTo                 LocationCode?
+  reservationReference       String?         @db.VarChar(128)
+  version                    Int             @default(1)
+  verifiedAt                 DateTime        @db.Timestamptz(3)
+  sourceRef                  String          @db.VarChar(2000)
+  createdAt                  DateTime        @default(now()) @db.Timestamptz(3)
+  updatedAt                  DateTime        @updatedAt @db.Timestamptz(3)
+  productIdRelation          Product         @relation("StockItem_productId", fields: [productId], references: [id], onDelete: Restrict)
+  barcodeRelation            BarcodeIdentity @relation("StockItem_barcode", fields: [barcode], references: [barcode], onDelete: Restrict)
+  locationCodeRelation       Store           @relation("StockItem_locationCode", fields: [locationCode], references: [code], onDelete: Restrict)
+  transferToRelation         Store?          @relation("StockItem_transferTo", fields: [transferTo], references: [code], onDelete: Restrict)
+  from_StockSale_stockItemId StockSale?      @relation("StockSale_stockItemId")
+  from_QuoteLine_stockItemId QuoteLine[]     @relation("QuoteLine_stockItemId")
+  from_OrderLine_stockItemId OrderLine[]     @relation("OrderLine_stockItemId")
+
+  @@unique([barcode])
+  @@unique([reservationReference])
+  @@index([productId, status, price])
+  @@index([locationCode, status])
+}
+
+model StockSale {
+  id                   String        @id @default(uuid()) @db.Uuid
+  stockItemId          String        @unique @db.Uuid
+  channel              SaleChannel
+  storeCode            LocationCode?
+  documentRef          String        @db.VarChar(255)
+  soldAt               DateTime      @db.Timestamptz(3)
+  amount               Decimal       @db.Decimal(12, 2)
+  currency             String        @db.VarChar(3)
+  recordedById         String        @db.Uuid
+  sellerProvenance     String?       @db.VarChar(1000)
+  sourceCode           String        @db.VarChar(80)
+  sourceEventId        String        @db.VarChar(255)
+  createdAt            DateTime      @default(now()) @db.Timestamptz(3)
+  stockItemIdRelation  StockItem     @relation("StockSale_stockItemId", fields: [stockItemId], references: [id], onDelete: Restrict)
+  storeCodeRelation    Store?        @relation("StockSale_storeCode", fields: [storeCode], references: [code], onDelete: Restrict)
+  recordedByIdRelation Principal     @relation("StockSale_recordedById", fields: [recordedById], references: [id], onDelete: Restrict)
+
+  @@unique([sourceCode, sourceEventId])
+}
+
+model ContentTranslation {
+  id                String        @id @default(uuid()) @db.Uuid
+  contentId         String        @db.Uuid
+  locale            Locale
+  published         Boolean       @default(false)
+  title             String        @db.VarChar(250)
+  intro             String?       @db.VarChar(3000)
+  slug              String?       @db.VarChar(180)
+  sections          Json
+  seoTitle          String?       @db.VarChar(250)
+  seoDescription    String?       @db.VarChar(1000)
+  publishedAt       DateTime?     @db.Timestamptz(3)
+  publicModifiedAt  DateTime?     @db.Timestamptz(3)
+  createdAt         DateTime      @default(now()) @db.Timestamptz(3)
+  updatedAt         DateTime      @updatedAt @db.Timestamptz(3)
+  contentIdRelation ContentRecord @relation("ContentTranslation_contentId", fields: [contentId], references: [id], onDelete: Restrict)
+
+  @@unique([contentId, locale])
+  @@index([locale, published])
+}
+
+model ContentLink {
+  id                      String         @id @default(uuid()) @db.Uuid
+  ownerContentId          String         @db.Uuid
+  slot                    String         @db.VarChar(80)
+  sortOrder               Int
+  targetContentId         String?        @db.Uuid
+  targetProductId         String?        @db.Uuid
+  targetStoreCode         LocationCode?
+  routeId                 String?        @db.VarChar(80)
+  externalUrl             String?        @db.VarChar(2000)
+  labelBg                 String?        @db.VarChar(255)
+  labelEn                 String?        @db.VarChar(255)
+  ownerContentIdRelation  ContentRecord  @relation("ContentLink_ownerContentId", fields: [ownerContentId], references: [id], onDelete: Restrict)
+  targetContentIdRelation ContentRecord? @relation("ContentLink_targetContentId", fields: [targetContentId], references: [id], onDelete: Restrict)
+  targetProductIdRelation Product?       @relation("ContentLink_targetProductId", fields: [targetProductId], references: [id], onDelete: Restrict)
+  targetStoreCodeRelation Store?         @relation("ContentLink_targetStoreCode", fields: [targetStoreCode], references: [code], onDelete: Restrict)
+
+  @@unique([ownerContentId, slot, sortOrder])
+}
+
+model PolicyVersion {
+  id                         String     @id @default(uuid()) @db.Uuid
+  kind                       PolicyKind
+  versionLabel               String     @db.VarChar(80)
+  locale                     Locale
+  title                      String     @db.VarChar(250)
+  body                       String     @db.Text
+  url                        String     @db.VarChar(1000)
+  current                    Boolean    @default(false)
+  published                  Boolean    @default(false)
+  verifiedPublishedAt        DateTime?  @db.Timestamptz(3)
+  createdAt                  DateTime   @default(now()) @db.Timestamptz(3)
+  from_Quote_policyVersionId Quote[]    @relation("Quote_policyVersionId")
+  from_Order_policyVersionId Order[]    @relation("Order_policyVersionId")
+
+  @@unique([kind, versionLabel, locale])
+}
+
+model ImportBatch {
+  id                            String             @id @default(uuid()) @db.Uuid
+  actorId                       String             @db.Uuid
+  requestId                     String             @db.VarChar(128)
+  payloadHash                   String             @db.VarChar(64)
+  state                         ImportState
+  report                        Json
+  createdAt                     DateTime           @default(now()) @db.Timestamptz(3)
+  committedAt                   DateTime?          @db.Timestamptz(3)
+  actorIdRelation               Principal          @relation("ImportBatch_actorId", fields: [actorId], references: [id], onDelete: Restrict)
+  from_ImportProductRow_batchId ImportProductRow[] @relation("ImportProductRow_batchId")
+
+  @@unique([actorId, requestId])
+}
+
+model ImportProductRow {
+  id                String         @id @default(uuid()) @db.Uuid
+  batchId           String         @db.Uuid
+  ssgId             String         @db.VarChar(40)
+  productId         String?        @db.Uuid
+  state             ImportRowState
+  payload           Json
+  errors            Json
+  createdAt         DateTime       @default(now()) @db.Timestamptz(3)
+  batchIdRelation   ImportBatch    @relation("ImportProductRow_batchId", fields: [batchId], references: [id], onDelete: Restrict)
+  productIdRelation Product?       @relation("ImportProductRow_productId", fields: [productId], references: [id], onDelete: Restrict)
+
+  @@unique([batchId, ssgId])
+  @@index([productId])
+}
+
+model Quote {
+  id                             String              @id @default(uuid()) @db.Uuid
+  guestId                        String              @db.Uuid
+  policyVersionId                String              @db.Uuid
+  locale                         Locale
+  customer                       Json
+  fulfilment                     Json
+  paymentMethodCode              String              @db.VarChar(80)
+  paymentTiming                  PaymentTiming
+  itemsTotal                     Decimal             @db.Decimal(12, 2)
+  deliveryFee                    Decimal             @db.Decimal(12, 2)
+  total                          Decimal             @db.Decimal(12, 2)
+  currency                       String              @db.VarChar(3)
+  settingsVersion                Int
+  reviewHash                     String              @db.VarChar(64)
+  expiresAt                      DateTime?           @db.Timestamptz(3)
+  consumedAt                     DateTime?           @db.Timestamptz(3)
+  createdAt                      DateTime            @default(now()) @db.Timestamptz(3)
+  guestIdRelation                GuestSession        @relation("Quote_guestId", fields: [guestId], references: [id], onDelete: Restrict)
+  policyVersionIdRelation        PolicyVersion       @relation("Quote_policyVersionId", fields: [policyVersionId], references: [id], onDelete: Restrict)
+  from_QuoteLine_quoteId         QuoteLine[]         @relation("QuoteLine_quoteId")
+  from_Order_quoteId             Order?              @relation("Order_quoteId")
+  from_SubmissionAttempt_quoteId SubmissionAttempt[] @relation("SubmissionAttempt_quoteId")
+
+  @@index([guestId, createdAt])
+}
+
+model QuoteLine {
+  id                  String     @id @default(uuid()) @db.Uuid
+  quoteId             String     @db.Uuid
+  stockItemId         String     @db.Uuid
+  productId           String     @db.Uuid
+  assetId             String     @db.Uuid
+  sortOrder           Int
+  unitPrice           Decimal    @db.Decimal(12, 2)
+  publicSnapshot      Json
+  stockVersion        Int
+  productVersion      Int
+  quoteIdRelation     Quote      @relation("QuoteLine_quoteId", fields: [quoteId], references: [id], onDelete: Restrict)
+  stockItemIdRelation StockItem  @relation("QuoteLine_stockItemId", fields: [stockItemId], references: [id], onDelete: Restrict)
+  productIdRelation   Product    @relation("QuoteLine_productId", fields: [productId], references: [id], onDelete: Restrict)
+  assetIdRelation     MediaAsset @relation("QuoteLine_assetId", fields: [assetId], references: [id], onDelete: Restrict)
+
+  @@unique([quoteId, stockItemId])
+  @@unique([quoteId, sortOrder])
+}
+
+model Order {
+  id                             String             @id @default(uuid()) @db.Uuid
+  numberSequence                 BigInt             @unique @default(autoincrement())
+  number                         String             @db.VarChar(40)
+  guestId                        String             @db.Uuid
+  quoteId                        String             @unique @db.Uuid
+  policyVersionId                String             @db.Uuid
+  locale                         Locale
+  status                         OrderStatus        @default(received)
+  version                        Int                @default(1)
+  customer                       Json
+  fulfilment                     Json
+  paymentMethodCode              String             @db.VarChar(80)
+  paymentTiming                  PaymentTiming
+  itemsTotal                     Decimal            @db.Decimal(12, 2)
+  deliveryFee                    Decimal            @db.Decimal(12, 2)
+  total                          Decimal            @db.Decimal(12, 2)
+  originalTotal                  Decimal            @db.Decimal(12, 2)
+  currency                       String             @db.VarChar(3)
+  termsAcceptedAt                DateTime           @db.Timestamptz(3)
+  termsActorReference            String             @db.VarChar(255)
+  financialTermsPending          Boolean            @default(false)
+  attentionCodes                 String[]           @default([])
+  createdAt                      DateTime           @default(now()) @db.Timestamptz(3)
+  updatedAt                      DateTime           @updatedAt @db.Timestamptz(3)
+  guestIdRelation                GuestSession       @relation("Order_guestId", fields: [guestId], references: [id], onDelete: Restrict)
+  quoteIdRelation                Quote              @relation("Order_quoteId", fields: [quoteId], references: [id], onDelete: Restrict)
+  policyVersionIdRelation        PolicyVersion      @relation("Order_policyVersionId", fields: [policyVersionId], references: [id], onDelete: Restrict)
+  from_SubmissionAttempt_orderId SubmissionAttempt? @relation("SubmissionAttempt_orderId")
+  from_OrderLine_orderId         OrderLine[]        @relation("OrderLine_orderId")
+  from_OutboxMessage_orderId     OutboxMessage[]    @relation("OutboxMessage_orderId")
+  from_Acceptance_orderId        Acceptance?        @relation("Acceptance_orderId")
+  from_PaymentOperation_orderId  PaymentOperation[] @relation("PaymentOperation_orderId")
+  from_AccessGrant_orderId       AccessGrant[]      @relation("AccessGrant_orderId")
+
+  @@unique([number])
+  @@index([guestId, createdAt])
+  @@index([status, createdAt])
+}
+
+model SubmissionAttempt {
+  id              String       @id @default(uuid()) @db.Uuid
+  guestId         String       @db.Uuid
+  requestId       String       @db.VarChar(128)
+  payloadHash     String       @db.VarChar(64)
+  quoteId         String       @db.Uuid
+  state           AttemptState @default(pending)
+  orderId         String?      @unique @db.Uuid
+  rejectionCode   String?      @db.VarChar(80)
+  createdAt       DateTime     @default(now()) @db.Timestamptz(3)
+  updatedAt       DateTime     @updatedAt @db.Timestamptz(3)
+  guestIdRelation GuestSession @relation("SubmissionAttempt_guestId", fields: [guestId], references: [id], onDelete: Restrict)
+  quoteIdRelation Quote        @relation("SubmissionAttempt_quoteId", fields: [quoteId], references: [id], onDelete: Restrict)
+  orderIdRelation Order?       @relation("SubmissionAttempt_orderId", fields: [orderId], references: [id], onDelete: Restrict)
+
+  @@unique([guestId, requestId])
+}
+
+model OrderLine {
+  id                              String             @id @default(uuid()) @db.Uuid
+  orderId                         String             @db.Uuid
+  stockItemId                     String             @db.Uuid
+  productId                       String             @db.Uuid
+  assetId                         String             @db.Uuid
+  sortOrder                       Int
+  unitPrice                       Decimal            @db.Decimal(12, 2)
+  snapshot                        Json
+  reservationReference            String             @db.VarChar(128)
+  reservedLocation                LocationCode
+  decision                        LineDecision       @default(pending)
+  decisionReason                  RestrictionReason?
+  decisionNote                    String?            @db.VarChar(2000)
+  decidedById                     String?            @db.Uuid
+  decidedAt                       DateTime?          @db.Timestamptz(3)
+  orderIdRelation                 Order              @relation("OrderLine_orderId", fields: [orderId], references: [id], onDelete: Restrict)
+  stockItemIdRelation             StockItem          @relation("OrderLine_stockItemId", fields: [stockItemId], references: [id], onDelete: Restrict)
+  productIdRelation               Product            @relation("OrderLine_productId", fields: [productId], references: [id], onDelete: Restrict)
+  assetIdRelation                 MediaAsset         @relation("OrderLine_assetId", fields: [assetId], references: [id], onDelete: Restrict)
+  reservedLocationRelation        Store              @relation("OrderLine_reservedLocation", fields: [reservedLocation], references: [code], onDelete: Restrict)
+  decidedByIdRelation             Principal?         @relation("OrderLine_decidedById", fields: [decidedById], references: [id], onDelete: Restrict)
+  from_StoreCheck_lineId          StoreCheck?        @relation("StoreCheck_lineId")
+  from_AcceptanceLine_orderLineId AcceptanceLine?    @relation("AcceptanceLine_orderLineId")
+
+  @@unique([orderId, stockItemId])
+  @@unique([orderId, sortOrder])
+  @@index([stockItemId])
+}
+
+model Inquiry {
+  id                           String          @id @default(uuid()) @db.Uuid
+  guestId                      String          @db.Uuid
+  requestId                    String          @db.VarChar(128)
+  payloadHash                  String          @db.VarChar(64)
+  type                         InquiryType
+  name                         String          @db.VarChar(200)
+  email                        String          @db.VarChar(320)
+  phone                        String?         @db.VarChar(40)
+  topic                        String          @db.VarChar(250)
+  message                      String          @db.Text
+  locale                       Locale
+  originRouteId                String          @db.VarChar(80)
+  productId                    String?         @db.Uuid
+  contentId                    String?         @db.Uuid
+  storeCode                    LocationCode?
+  createdAt                    DateTime        @default(now()) @db.Timestamptz(3)
+  guestIdRelation              GuestSession    @relation("Inquiry_guestId", fields: [guestId], references: [id], onDelete: Restrict)
+  productIdRelation            Product?        @relation("Inquiry_productId", fields: [productId], references: [id], onDelete: Restrict)
+  contentIdRelation            ContentRecord?  @relation("Inquiry_contentId", fields: [contentId], references: [id], onDelete: Restrict)
+  storeCodeRelation            Store?          @relation("Inquiry_storeCode", fields: [storeCode], references: [code], onDelete: Restrict)
+  from_OutboxMessage_inquiryId OutboxMessage[] @relation("OutboxMessage_inquiryId")
+
+  @@unique([guestId, requestId])
+}
+
+model OutboxMessage {
+  id                             String            @id @default(uuid()) @db.Uuid
+  dedupeKey                      String            @db.VarChar(255)
+  kind                           JobKind
+  orderId                        String?           @db.Uuid
+  inquiryId                      String?           @db.Uuid
+  recipientSnapshot              String?           @db.VarChar(320)
+  locale                         Locale?
+  templateVersion                String?           @db.VarChar(80)
+  payload                        Json
+  encryptedSecret                String?           @db.VarChar(4000)
+  status                         JobStatus         @default(pending)
+  attempts                       Int               @default(0)
+  nextAttemptAt                  DateTime?         @db.Timestamptz(3)
+  leaseUntil                     DateTime?         @db.Timestamptz(3)
+  leaseOwner                     String?           @db.VarChar(128)
+  lastError                      String?           @db.VarChar(1000)
+  sentAt                         DateTime?         @db.Timestamptz(3)
+  providerMessageId              String?           @db.VarChar(255)
+  createdAt                      DateTime          @default(now()) @db.Timestamptz(3)
+  updatedAt                      DateTime          @updatedAt @db.Timestamptz(3)
+  orderIdRelation                Order?            @relation("OutboxMessage_orderId", fields: [orderId], references: [id], onDelete: Restrict)
+  inquiryIdRelation              Inquiry?          @relation("OutboxMessage_inquiryId", fields: [inquiryId], references: [id], onDelete: Restrict)
+  from_StoreCheck_messageId      StoreCheck[]      @relation("StoreCheck_messageId")
+  from_DeliveryAttempt_messageId DeliveryAttempt[] @relation("DeliveryAttempt_messageId")
+
+  @@unique([dedupeKey])
+  @@index([status, nextAttemptAt, leaseUntil])
+}
+
+model StoreCheck {
+  id                   String         @id @default(uuid()) @db.Uuid
+  lineId               String         @unique @db.Uuid
+  locationCode         LocationCode
+  status               CheckStatus    @default(pending)
+  checkedById          String?        @db.Uuid
+  checkedAt            DateTime?      @db.Timestamptz(3)
+  note                 String?        @db.VarChar(2000)
+  notificationEventId  String         @db.VarChar(128)
+  messageId            String?        @db.Uuid
+  lineIdRelation       OrderLine      @relation("StoreCheck_lineId", fields: [lineId], references: [id], onDelete: Restrict)
+  locationCodeRelation Store          @relation("StoreCheck_locationCode", fields: [locationCode], references: [code], onDelete: Restrict)
+  checkedByIdRelation  Principal?     @relation("StoreCheck_checkedById", fields: [checkedById], references: [id], onDelete: Restrict)
+  messageIdRelation    OutboxMessage? @relation("StoreCheck_messageId", fields: [messageId], references: [id], onDelete: Restrict)
+
+  @@unique([notificationEventId])
+}
+
+model Acceptance {
+  id                               String           @id @default(uuid()) @db.Uuid
+  orderId                          String           @unique @db.Uuid
+  orderVersion                     Int
+  acceptedById                     String           @db.Uuid
+  acceptedAt                       DateTime         @db.Timestamptz(3)
+  acceptedItemsSubtotal            Decimal          @db.Decimal(12, 2)
+  financialTermsPending            Boolean
+  orderIdRelation                  Order            @relation("Acceptance_orderId", fields: [orderId], references: [id], onDelete: Restrict)
+  acceptedByIdRelation             Principal        @relation("Acceptance_acceptedById", fields: [acceptedById], references: [id], onDelete: Restrict)
+  from_AcceptanceLine_acceptanceId AcceptanceLine[] @relation("AcceptanceLine_acceptanceId")
+}
+
+model AcceptanceLine {
+  id                   String             @id @default(uuid()) @db.Uuid
+  acceptanceId         String             @db.Uuid
+  orderLineId          String             @unique @db.Uuid
+  accepted             Boolean
+  internalReason       RestrictionReason?
+  internalNote         String?            @db.VarChar(2000)
+  acceptanceIdRelation Acceptance         @relation("AcceptanceLine_acceptanceId", fields: [acceptanceId], references: [id], onDelete: Restrict)
+  orderLineIdRelation  OrderLine          @relation("AcceptanceLine_orderLineId", fields: [orderLineId], references: [id], onDelete: Restrict)
+
+  @@unique([acceptanceId, orderLineId])
+}
+
+model PaymentOperation {
+  id                   String        @id @default(uuid()) @db.Uuid
+  orderId              String        @db.Uuid
+  sourceCode           String        @db.VarChar(80)
+  externalReference    String        @db.VarChar(255)
+  status               PaymentStatus
+  amount               Decimal       @db.Decimal(12, 2)
+  currency             String        @db.VarChar(3)
+  occurredAt           DateTime      @db.Timestamptz(3)
+  recordedById         String        @db.Uuid
+  evidenceRef          String        @db.VarChar(2000)
+  factsHash            String        @db.VarChar(64)
+  createdAt            DateTime      @default(now()) @db.Timestamptz(3)
+  updatedAt            DateTime      @updatedAt @db.Timestamptz(3)
+  orderIdRelation      Order         @relation("PaymentOperation_orderId", fields: [orderId], references: [id], onDelete: Restrict)
+  recordedByIdRelation Principal     @relation("PaymentOperation_recordedById", fields: [recordedById], references: [id], onDelete: Restrict)
+
+  @@unique([sourceCode, externalReference])
+  @@index([orderId, status])
+}
+
+model AccessGrant {
+  id                         String          @id @default(uuid()) @db.Uuid
+  orderId                    String          @db.Uuid
+  scope                      GrantScope
+  principalId                String?         @db.Uuid
+  tokenHash                  String          @db.VarChar(64)
+  expiresAt                  DateTime        @db.Timestamptz(3)
+  revokedAt                  DateTime?       @db.Timestamptz(3)
+  redeemedAt                 DateTime?       @db.Timestamptz(3)
+  redeemedGuestId            String?         @db.Uuid
+  createdAt                  DateTime        @default(now()) @db.Timestamptz(3)
+  orderIdRelation            Order           @relation("AccessGrant_orderId", fields: [orderId], references: [id], onDelete: Restrict)
+  principalIdRelation        Principal?      @relation("AccessGrant_principalId", fields: [principalId], references: [id], onDelete: Restrict)
+  redeemedGuestIdRelation    GuestSession?   @relation("AccessGrant_redeemedGuestId", fields: [redeemedGuestId], references: [id], onDelete: Restrict)
+  from_AccessSession_grantId AccessSession[] @relation("AccessSession_grantId")
+
+  @@unique([tokenHash])
+  @@index([orderId, scope])
+}
+
+model AccessSession {
+  id              String       @id @default(uuid()) @db.Uuid
+  grantId         String       @db.Uuid
+  guestId         String       @db.Uuid
+  tokenHash       String       @db.VarChar(64)
+  expiresAt       DateTime     @db.Timestamptz(3)
+  revokedAt       DateTime?    @db.Timestamptz(3)
+  createdAt       DateTime     @default(now()) @db.Timestamptz(3)
+  grantIdRelation AccessGrant  @relation("AccessSession_grantId", fields: [grantId], references: [id], onDelete: Restrict)
+  guestIdRelation GuestSession @relation("AccessSession_guestId", fields: [guestId], references: [id], onDelete: Restrict)
+
+  @@unique([tokenHash])
+  @@unique([grantId, guestId])
+}
+
+model ActionRequest {
+  id                                String        @id @default(uuid()) @db.Uuid
+  scopeKey                          String        @db.VarChar(255)
+  requestId                         String        @db.VarChar(128)
+  payloadHash                       String        @db.VarChar(64)
+  state                             AttemptState  @default(pending)
+  result                            Json?
+  createdAt                         DateTime      @default(now()) @db.Timestamptz(3)
+  updatedAt                         DateTime      @updatedAt @db.Timestamptz(3)
+  from_AccessLookup_actionRequestId AccessLookup? @relation("AccessLookup_actionRequestId")
+
+  @@unique([scopeKey, requestId])
+}
+
+model DeliveryAttempt {
+  id                String        @id @default(uuid()) @db.Uuid
+  messageId         String        @db.Uuid
+  attemptNumber     Int
+  startedAt         DateTime      @db.Timestamptz(3)
+  finishedAt        DateTime?     @db.Timestamptz(3)
+  outcome           String?       @db.VarChar(40)
+  safeError         String?       @db.VarChar(1000)
+  messageIdRelation OutboxMessage @relation("DeliveryAttempt_messageId", fields: [messageId], references: [id], onDelete: Restrict)
+
+  @@unique([messageId, attemptNumber])
+}
+
+model AuditEvent {
+  id              String             @id @default(uuid()) @db.Uuid
+  actorId         String?            @db.Uuid
+  guestId         String?            @db.Uuid
+  systemActor     String?            @db.VarChar(100)
+  action          String             @db.VarChar(100)
+  subjectType     String             @db.VarChar(80)
+  subjectId       String             @db.VarChar(255)
+  reason          RestrictionReason?
+  note            String?            @db.VarChar(2000)
+  before          Json?
+  after           Json?
+  eventKey        String             @db.VarChar(255)
+  createdAt       DateTime           @default(now()) @db.Timestamptz(3)
+  actorIdRelation Principal?         @relation("AuditEvent_actorId", fields: [actorId], references: [id], onDelete: Restrict)
+  guestIdRelation GuestSession?      @relation("AuditEvent_guestId", fields: [guestId], references: [id], onDelete: Restrict)
+
+  @@unique([eventKey])
+  @@index([subjectType, subjectId, createdAt])
+}
+
+model AccessLookup {
+  id                      String        @id @default(uuid()) @db.Uuid
+  actionRequestId         String        @unique @db.Uuid
+  guestId                 String        @db.Uuid
+  encryptedInput          String        @db.VarChar(4000)
+  expiresAt               DateTime      @db.Timestamptz(3)
+  processedAt             DateTime?     @db.Timestamptz(3)
+  createdAt               DateTime      @default(now()) @db.Timestamptz(3)
+  actionRequestIdRelation ActionRequest @relation("AccessLookup_actionRequestId", fields: [actionRequestId], references: [id], onDelete: Restrict)
+  guestIdRelation         GuestSession  @relation("AccessLookup_guestId", fields: [guestId], references: [id], onDelete: Restrict)
+
+  @@index([processedAt, expiresAt])
+}
+
+model ProductRelatedLink {
+  id                       String  @id @default(uuid()) @db.Uuid
+  productId                String  @db.Uuid
+  relatedProductId         String  @db.Uuid
+  sortOrder                Int
+  productIdRelation        Product @relation("ProductRelatedLink_productId", fields: [productId], references: [id], onDelete: Restrict)
+  relatedProductIdRelation Product @relation("ProductRelatedLink_relatedProductId", fields: [relatedProductId], references: [id], onDelete: Restrict)
+
+  @@unique([productId, relatedProductId])
+  @@unique([productId, sortOrder])
+}

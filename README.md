@@ -19,6 +19,84 @@ Use `npx nx build skv-web-api` to build. Prisma targets are
 Builds generate the application-local Prisma Client automatically.
 The example credentials are for local development only.
 
+### Admin catalogue draft reads
+
+`GET /api/admin/catalogue` lists catalogue products with optional `q` (SSG ID,
+product UUID, numeric public URL ID or BG/EN draft/current title),
+`publication_status` (`draft`, `published`, `hidden`), `page` (default 1) and
+`page_size` (default 24, maximum 100). Paging is stable; names come from the draft
+when one exists, otherwise the current published revision.
+
+`GET /api/admin/catalogue/:id` returns the allowlisted `AdminProduct` contract:
+the optional draft and its actual revision UUID, current published revision
+UUID, slug previews, verified units, distinct committed/claimed but unpromoted
+staged-unit count and actionable draft validation errors. Unknown UUIDs return
+404; unsupported queries return 400. These GETs never create drafts, promote
+units, approve media or publish products. Read-time media checks inspect stored
+metadata; they do not replace byte verification at publication.
+
+Both endpoints require a live enabled staff Principal with `catalogue_read`
+and return `Cache-Control: private, no-store`. Public product endpoints continue
+to exclude drafts. No public origin/CDN configuration is needed to read drafts.
+The Postman collection includes an **Admin catalogue** folder: run **List draft
+products**, copy an item UUID into `productId`, then run **Read admin product
+and draft**.
+
+For local development, the opt-in staff adapter uses the existing configured
+Origin and `X-Dev-Staff-Token`/`X-CSRF-Token` headers. Newly created development
+Principals receive `catalogue_read` and `catalogue_edit`; existing permissions
+are never automatically re-granted by requests. Provision `catalogue_read` for
+an existing development Principal through an authorized database administration
+operation if necessary. Production staff authentication remains separate and
+is not provided by this development adapter.
+
+### Development outbox worker
+
+The worker is disabled by default. To run private local capture (no external
+email), set `OUTBOX_WORKER_ENABLED=true` and `OUTBOX_CAPTURE_DIRECTORY` to an
+absolute directory outside the repository and public/media roots. Existing
+directories must be private (owner-only permissions). Capture files contain
+personal data and must never be committed or served publicly.
+
+Run `npx nx serve skv-web-api` to start the worker with the application.
+`OUTBOX_POLL_INTERVAL_MS`, `OUTBOX_LEASE_MS`, `OUTBOX_MAX_ATTEMPTS`,
+`OUTBOX_RETRY_BASE_MS` and `OUTBOX_RETRY_MAX_MS` configure polling, leases and
+bounded exponential backoff; defaults are in the application's `.env.example`.
+Shutdown waits for the current iteration.
+
+Currently, `inquiry_received` (`inquiry-v1`), `customer_payment_received`
+(`payment-v1`) and `customer_order_confirmed` (`acceptance-v1`) render escaped
+BG/EN HTML and plain text from stored inquiry/order/payment/acceptance snapshots.
+Customer notifications only use the original order email and locale. Payment
+copy does not promise acceptance; acceptance lists the exact accepted and
+not-accepted subsets and subtotal, with financial clarification for partial
+acceptance. Before an unsent acceptance notification, current accepted-unit
+reservation conflicts suppress the message and flag `accepted_stock_conflict`
+on the order. Already captured mail is reconciled before this check; sent
+evidence is never retracted. A later stock fact can still race the external
+capture after the final check. Atomic private capture uses the message UUID as
+its idempotency key and reconciles existing captures after interrupted
+attempts. `sent` means accepted by local capture, not externally delivered.
+
+Other job kinds require registered domain handlers; until wired they fail
+with `JOB_HANDLER_UNAVAILABLE`, never successful no-op dispatch. Handlers
+must use immutable snapshots and idempotent processing. Email handlers must
+reconcile uncertain provider acceptance before retrying; do not register a
+network sender without that guarantee. No production adapter is installed,
+and enabling this development worker in production is rejected.
+
+Monitor `OutboxMessage.status/lastError/attempts` and `DeliveryAttempt` plus
+the sanitized worker logs. Exhausted failures require operational review;
+an expired in-flight lease remains recoverable, including the final attempt.
+Failures never release inventory or change order/payment facts; an unsafe
+acceptance notification only appends audited operational attention.
+
+The stock-sale trigger correction migration fixes row-field selection when the
+shared trigger runs on `StockItem` versus `StockSale`; it does not alter stock
+data or remove indexes. The initial migration includes SQL-only foreign-key
+indexes absent from Prisma's model metadata. Review generated migration diffs
+and preserve these indexes rather than applying automatic `DROP INDEX` output.
+
 <a alt="Nx logo" href="https://nx.dev" target="_blank" rel="noreferrer"><img src="https://raw.githubusercontent.com/nrwl/nx/master/images/nx-logo.png" width="45"></a>
 
 ✨ Your new, shiny [Nx workspace](https://nx.dev) is ready ✨.
