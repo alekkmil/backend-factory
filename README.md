@@ -3,7 +3,7 @@
 ## ssg-web-api
 
 The NestJS application lives in `apps/ssg-web-api` and listens on port 3001
-by default. Its liveness endpoint is `GET /api/health`.
+by default. Its database health endpoint is `GET /internal/health`.
 
 Copy `apps/ssg-web-api/.env.example` to `apps/ssg-web-api/.env`, then start
 its local PostgreSQL database (host port 5433):
@@ -24,6 +24,100 @@ migrations and implementation sources moved with it. Database credentials,
 database names and the legacy Docker Compose project/volume identity remain
 unchanged so existing imported products and database containers are reused.
 The Postman collection is `apps/ssg-web-api/postman/ssg-web-api.postman_collection.json`.
+
+### Dev deployment to AWS Lightsail
+
+Pushes to `dev` that change this application, shared libraries/tooling, or root
+build configuration run
+[Deploy ssg-web-api (dev)](.github/workflows/deploy-ssg-web-api-dev.yml).
+Manual runs must also select `dev`; other branches do not deploy.
+The [reusable workflow](.github/workflows/deploy-lightsail.yml) builds with Nx,
+ships only compiled output and its generated runtime manifest/lockfile over
+verified SSH, installs production dependencies on the server, applies pending
+Prisma migrations, and starts/restarts the application's PM2 process.
+The artifact also includes this application's schema, migration history and
+Prisma config, plus a separate lockfile for the migration CLI using the
+repository's installed Prisma version. No Docker, AWS access keys, or source
+checkout on the server is needed.
+The webpack build already generates the runtime lockfile; this workflow does
+not use the separate Nx `prune` target.
+
+One-time server setup (Ubuntu Lightsail with a static public IP):
+
+1. Install Node.js 24, npm and PM2, plus `curl`, `tar`, and `util-linux` (`flock`).
+   All must be on the deployment user's non-interactive SSH `PATH`.
+2. Use the user that owns your PM2 daemon (for example, `deploy`), with an SSH
+   key and an application-owned
+   directory:
+   ```sh
+   sudo install -d -m 700 -o deploy -g deploy /srv/ssg-web-api
+   ```
+3. As that user, configure PM2 reboot persistence:
+   ```sh
+   pm2 startup
+   ```
+   Execute the privileged setup command PM2 prints. The workflow runs `pm2 save`
+   after healthy deployments. Use the same user and `PM2_HOME` for SSH deployment,
+   administration and startup; do not run deployment PM2 commands with sudo.
+   The process name is `ssg-web-api`. Its
+   [ecosystem config](tools/deploy/ecosystem.config.cjs) ships with each release.
+   If the earlier application-specific systemd service was installed, disable
+   and stop it before switching so it cannot compete for port 3001.
+4. Provision the application's PostgreSQL database and grant its deployment
+   database user the permissions needed to apply migrations. Each deploy runs
+   `prisma migrate deploy` on Lightsail using only this application's
+   `DATABASE_URL` from `APP_ENV`. No pending migrations is a successful no-op.
+   Review committed SQL before pushing; destructive migrations require explicit
+   approval and backups. Use additive, backward-compatible migrations because
+   the old application remains running while migrations apply.
+5. Configure an HTTPS reverse proxy to `127.0.0.1:3001`. Do not expose port 3001,
+   PostgreSQL, or `/internal/health` publicly. Allow SSH in the Lightsail firewall
+   from your deployment runner (use a fixed-egress runner if strict IP allowlisting
+   is required).
+
+Create the GitHub **Environment** `ssg-web-api-dev`, restrict its deployment
+branches to `dev`, and add these **environment secrets**:
+
+| Secret | Value |
+| --- | --- |
+| `SSH_HOST` | Lightsail static IPv4 address or DNS hostname |
+| `SSH_USER` | `deploy` |
+| `SSH_PRIVATE_KEY` | Dedicated deployment private key |
+| `SSH_KNOWN_HOSTS` | Server's known-hosts entry, verified using a trusted console; do not blindly trust a live `ssh-keyscan` |
+| `APP_ENV` | Complete multiline application environment file |
+
+`APP_ENV` uses dotenv syntax: one `KEY=value` per line,
+without `export` or variable interpolation. Start from the application's
+[environment example](apps/ssg-web-api/.env.example), set `PORT=3001`, configure
+the dev database and frontend CORS origin, and replace all example credentials.
+Use `NODE_ENV=production` for safe hosted defaults even on the `dev` branch;
+the development staff-auth adapter and local outbox worker are then disabled.
+Real production staff authentication is not implemented by this deployment.
+If local capture is intentionally enabled in a development environment, keep
+its private directory under `/srv/ssg-web-api/shared`, never in a release
+directory.
+
+Deployments are serialized per application/environment and additionally locked
+on the server. A failed restart or database health check restores the previous
+build and environment; a failed first deployment removes the PM2 process and fails
+the action. Expect a brief restart interruption, not zero-downtime deployment.
+PM2 deletes/recreates only this application's process to avoid retaining removed
+environment variables. Migration failure aborts before changing the running
+application; applied migrations are never automatically rolled back, including
+partially applied SQL. Resolve migration failures explicitly before redeploying.
+Old releases are retained for recovery; periodically remove only confirmed
+inactive releases to manage disk usage. Inspect service logs on the server,
+not public action logs, since they can contain operational details.
+
+To add another application, create its own caller workflow, GitHub environment,
+server directory and unique PM2 process name (derived from the application name).
+Call the reusable workflow with its Nx
+application name, environment, port and health path. The application must emit
+`main.js`, `package.json`, and `package-lock.json` under `dist/apps/<name>` and
+provide a health endpoint returning HTTP 2xx with `{"status":"ok"}`.
+It must also own a Prisma config and migration directory, since the reusable
+workflow runs migrations for each deployment.
+Keep every application's database, secrets and process isolated.
 
 ### Admin catalogue draft reads
 
