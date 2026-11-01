@@ -24,6 +24,7 @@ module.exports = {
       optimization: false,
       outputHashing: 'none',
       generatePackageJson: true,
+      runtimeDependencies: ['@prisma/client'],
       sourceMap: true,
     })
   ],
