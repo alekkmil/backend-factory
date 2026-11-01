@@ -1,0 +1,30 @@
+name: Deploy ssg-web-api (dev)
+
+on:
+  push:
+    branches: [dev]
+    paths:
+      - 'apps/ssg-web-api/**'
+      - 'libs/**'
+      - 'tools/**'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'nx.json'
+      - 'tsconfig*.json'
+      - 'eslint.config.mjs'
+      - '.github/workflows/deploy-ssg-web-api-dev.yml'
+      - '.github/workflows/deploy-lightsail.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    if: github.ref == 'refs/heads/dev'
+    uses: ./.github/workflows/deploy-lightsail.yml
+    with:
+      application: ssg-web-api
+      environment: ssg-web-api-dev
+      port: 3001
+      health-path: /internal/health
