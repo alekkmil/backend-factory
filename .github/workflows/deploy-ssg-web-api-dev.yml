@@ -13,18 +13,121 @@ on:
       - 'tsconfig*.json'
       - 'eslint.config.mjs'
       - '.github/workflows/deploy-ssg-web-api-dev.yml'
-      - '.github/workflows/deploy-lightsail.yml'
   workflow_dispatch:
 
 permissions:
   contents: read
 
+concurrency:
+  group: lightsail-ssg-web-api-dev-ssg-web-api
+  cancel-in-progress: false
+
 jobs:
   deploy:
     if: github.ref == 'refs/heads/dev'
-    uses: ./.github/workflows/deploy-lightsail.yml
-    with:
-      application: ssg-web-api
-      environment: ssg-web-api-dev
-      port: 3001
-      health-path: /internal/health
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    environment: ssg-web-api-dev
+    env:
+      NX_DAEMON: 'false'
+      APP: ssg-web-api
+      RELEASE: ${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+      APP_PORT: 3001
+      HEALTH_PATH: /internal/health
+    steps:
+      - name: Validate environment secrets
+        shell: bash
+        env:
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+          SSH_USER: ${{ secrets.SSH_USER }}
+          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+          SSH_KNOWN_HOSTS: ${{ secrets.SSH_KNOWN_HOSTS }}
+          APP_ENV: ${{ secrets.APP_ENV }}
+        run: |
+          set -euo pipefail
+          node <<'NODE'
+          const names = ['SSH_HOST', 'SSH_USER', 'SSH_PRIVATE_KEY', 'SSH_KNOWN_HOSTS', 'APP_ENV'];
+          const missing = names.filter(name => !process.env[name]);
+          for (const name of missing) {
+            console.error(`::error::Missing environment secret ${name} in ssg-web-api-dev.`);
+          }
+          process.exit(missing.length ? 1 : 0);
+          NODE
+
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+
+      - name: Validate deployment inputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$APP" =~ ^[a-z][a-z0-9-]*$ ]]
+          [[ "$APP_PORT" =~ ^[0-9]+$ ]] && (( APP_PORT > 0 && APP_PORT < 65536 ))
+          [[ "$HEALTH_PATH" =~ ^/[a-zA-Z0-9/_-]+$ ]]
+
+      - run: npm ci
+      - name: Validate and build application
+        run: |
+          set -euo pipefail
+          npx nx lint "$APP"
+          npx nx build "$APP" --skip-nx-cache
+          npx tsc --project "apps/$APP/tsconfig.app.json" --noEmit
+          test -f "dist/apps/$APP/main.js"
+          test -f "dist/apps/$APP/package.json"
+          test -f "dist/apps/$APP/package-lock.json"
+          staging="$RUNNER_TEMP/runtime/$APP"
+          mkdir -p "$staging"
+          cp -a "dist/apps/$APP/." "$staging/"
+          cp tools/deploy/ecosystem.config.cjs "$staging/"
+          mkdir "$staging/migration"
+          cp -a "apps/$APP/prisma" "apps/$APP/prisma.config.ts" "$staging/migration/"
+          node - "$staging/migration/package.json" <<'NODE'
+          const fs = require('node:fs');
+          fs.writeFileSync(process.argv[2], JSON.stringify({
+            name: 'application-migrations',
+            private: true,
+            dependencies: {
+              prisma: require('prisma/package.json').version,
+              dotenv: require('dotenv/package.json').version,
+            },
+          }, null, 2));
+          NODE
+          (cd "$staging/migration" && npm install --package-lock-only --ignore-scripts --no-audit --no-fund)
+          (cd "$staging" && npm ci --omit=dev --no-audit --no-fund)
+          tar --exclude='./node_modules' --exclude='*.map' \
+            -czf "$RUNNER_TEMP/release.tar.gz" -C "$staging" .
+
+      - name: Ship and activate release
+        shell: bash
+        env:
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+          SSH_USER: ${{ secrets.SSH_USER }}
+          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+          SSH_KNOWN_HOSTS: ${{ secrets.SSH_KNOWN_HOSTS }}
+          APP_ENV: ${{ secrets.APP_ENV }}
+        run: |
+          set -euo pipefail
+          [[ "$SSH_HOST" =~ ^[a-zA-Z0-9][a-zA-Z0-9.-]*$ ]]
+          [[ "$SSH_USER" =~ ^[a-z_][a-z0-9_-]*$ ]]
+          test -n "$SSH_PRIVATE_KEY"
+          test -n "$SSH_KNOWN_HOSTS"
+          test -n "$APP_ENV"
+          ssh_dir="$(mktemp -d)"
+          trap 'rm -f "$ssh_dir/key" "$ssh_dir/known_hosts" "$ssh_dir/app.env"; rmdir "$ssh_dir"' EXIT
+          chmod 700 "$ssh_dir"
+          umask 077
+          printf '%s\n' "$SSH_PRIVATE_KEY" > "$ssh_dir/key"
+          printf '%s\n' "$SSH_KNOWN_HOSTS" > "$ssh_dir/known_hosts"
+          printf '%s\n' "$APP_ENV" > "$ssh_dir/app.env"
+          ssh_options=(-i "$ssh_dir/key" -o BatchMode=yes -o StrictHostKeyChecking=yes -o "UserKnownHostsFile=$ssh_dir/known_hosts" -o ConnectTimeout=15 -o ServerAliveInterval=15 -o ServerAliveCountMax=3)
+          target="$SSH_USER@$SSH_HOST"
+          remote="/srv/$APP"
+          ssh "${ssh_options[@]}" "$target" \
+            "umask 077; mkdir -p '$remote/incoming/$RELEASE' '$remote/releases' '$remote/shared'"
+          scp "${ssh_options[@]}" "$RUNNER_TEMP/release.tar.gz" "$ssh_dir/app.env" \
+            tools/deploy/lightsail.sh "$target:$remote/incoming/$RELEASE/"
+          ssh "${ssh_options[@]}" "$target" \
+            "bash '$remote/incoming/$RELEASE/lightsail.sh' '$APP' '$RELEASE' '$APP_PORT' '$HEALTH_PATH'"
