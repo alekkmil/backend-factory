@@ -1,7 +1,7 @@
 {
-  "name": "skv-web-api",
+  "name": "ssg-web-api",
   "$schema": "../../node_modules/nx/schemas/project-schema.json",
-  "sourceRoot": "apps/skv-web-api/src",
+  "sourceRoot": "apps/ssg-web-api/src",
   "projectType": "application",
   "tags": [],
   "targets": {
@@ -19,7 +19,7 @@
       ],
       "options": {
         "cwd": "{workspaceRoot}",
-        "command": "npx prisma generate --config apps/skv-web-api/prisma.config.ts",
+        "command": "npx prisma generate --config apps/ssg-web-api/prisma.config.ts",
         "env": {
           "DATABASE_URL": "postgresql://generate:generate@localhost:5432/skv_web_api?schema=public"
         }
@@ -29,7 +29,7 @@
       "executor": "nx:run-commands",
       "options": {
         "cwd": "{workspaceRoot}",
-        "command": "npx prisma validate --config apps/skv-web-api/prisma.config.ts",
+        "command": "npx prisma validate --config apps/ssg-web-api/prisma.config.ts",
         "env": {
           "DATABASE_URL": "postgresql://generate:generate@localhost:5432/skv_web_api?schema=public"
         }
@@ -39,7 +39,7 @@
       "executor": "nx:run-commands",
       "options": {
         "cwd": "{workspaceRoot}",
-        "command": "npx prisma migrate dev --config apps/skv-web-api/prisma.config.ts",
+        "command": "npx prisma migrate dev --config apps/ssg-web-api/prisma.config.ts",
         "forwardAllArgs": true
       }
     },
@@ -47,7 +47,7 @@
       "executor": "nx:run-commands",
       "options": {
         "cwd": "{workspaceRoot}",
-        "command": "npx prisma migrate deploy --config apps/skv-web-api/prisma.config.ts",
+        "command": "npx prisma migrate deploy --config apps/ssg-web-api/prisma.config.ts",
         "forwardAllArgs": true
       }
     },
@@ -58,8 +58,8 @@
       "cache": true,
       "executor": "@nx/js:prune-lockfile",
       "outputs": [
-        "{workspaceRoot}/dist/apps/skv-web-api/package.json",
-        "{workspaceRoot}/dist/apps/skv-web-api/package-lock.json"
+        "{workspaceRoot}/dist/apps/ssg-web-api/package.json",
+        "{workspaceRoot}/dist/apps/ssg-web-api/package-lock.json"
       ],
       "options": {
         "buildTarget": "build"
@@ -71,7 +71,7 @@
       ],
       "cache": true,
       "outputs": [
-        "{workspaceRoot}/dist/apps/skv-web-api/workspace_modules"
+        "{workspaceRoot}/dist/apps/ssg-web-api/workspace_modules"
       ],
       "executor": "@nx/js:copy-workspace-modules",
       "options": {
@@ -93,15 +93,15 @@
         "build"
       ],
       "options": {
-        "buildTarget": "skv-web-api:build",
+        "buildTarget": "ssg-web-api:build",
         "runBuildTargetDependencies": false
       },
       "configurations": {
         "development": {
-          "buildTarget": "skv-web-api:build:development"
+          "buildTarget": "ssg-web-api:build:development"
         },
         "production": {
-          "buildTarget": "skv-web-api:build:production"
+          "buildTarget": "ssg-web-api:build:production"
         }
       }
     }

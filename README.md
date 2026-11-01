@@ -1,23 +1,29 @@
 # BackendFactory
 
-## skv-web-api
+## ssg-web-api
 
-The NestJS application lives in `apps/skv-web-api` and listens on port 3001
+The NestJS application lives in `apps/ssg-web-api` and listens on port 3001
 by default. Its liveness endpoint is `GET /api/health`.
 
-Copy `apps/skv-web-api/.env.example` to `apps/skv-web-api/.env`, then start
+Copy `apps/ssg-web-api/.env.example` to `apps/ssg-web-api/.env`, then start
 its local PostgreSQL database (host port 5433):
 
 ```sh
-docker compose -f apps/skv-web-api/docker-compose.yml --env-file apps/skv-web-api/.env up -d
-npx nx serve skv-web-api
+docker compose -f apps/ssg-web-api/docker-compose.yml --env-file apps/ssg-web-api/.env up -d
+npx nx serve ssg-web-api
 ```
 
-Use `npx nx build skv-web-api` to build. Prisma targets are
+Use `npx nx build ssg-web-api` to build. Prisma targets are
 `prisma-generate`, `prisma-validate`, `prisma-migrate-dev`, and
-`prisma-migrate-deploy`; for example, `npx nx run skv-web-api:prisma-generate`.
+`prisma-migrate-deploy`; for example, `npx nx run ssg-web-api:prisma-generate`.
 Builds generate the application-local Prisma Client automatically.
 The example credentials are for local development only.
+
+The application was renamed from `skv-web-api`. Its local `.env`, Prisma
+migrations and implementation sources moved with it. Database credentials,
+database names and the legacy Docker Compose project/volume identity remain
+unchanged so existing imported products and database containers are reused.
+The Postman collection is `apps/ssg-web-api/postman/ssg-web-api.postman_collection.json`.
 
 ### Admin catalogue draft reads
 
@@ -58,7 +64,7 @@ absolute directory outside the repository and public/media roots. Existing
 directories must be private (owner-only permissions). Capture files contain
 personal data and must never be committed or served publicly.
 
-Run `npx nx serve skv-web-api` to start the worker with the application.
+Run `npx nx serve ssg-web-api` to start the worker with the application.
 `OUTBOX_POLL_INTERVAL_MS`, `OUTBOX_LEASE_MS`, `OUTBOX_MAX_ATTEMPTS`,
 `OUTBOX_RETRY_BASE_MS` and `OUTBOX_RETRY_MAX_MS` configure polling, leases and
 bounded exponential backoff; defaults are in the application's `.env.example`.

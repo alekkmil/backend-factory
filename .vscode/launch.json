@@ -52,12 +52,12 @@
     {
       "type": "node",
       "request": "launch",
-      "name": "Debug skv-web-api with Nx",
+      "name": "Debug ssg-web-api with Nx",
       "runtimeExecutable": "npx",
       "runtimeArgs": [
         "nx",
         "serve",
-        "skv-web-api"
+        "ssg-web-api"
       ],
       "env": {
         "NODE_OPTIONS": "--inspect=9231"
@@ -69,7 +69,7 @@
       ],
       "sourceMaps": true,
       "outFiles": [
-        "${workspaceFolder}/dist/apps/skv-web-api/**/*.js",
+        "${workspaceFolder}/dist/apps/ssg-web-api/**/*.js",
         "!**/node_modules/**"
       ]
     }

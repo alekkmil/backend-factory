@@ -20,7 +20,7 @@ import { CatalogueAdminModule } from './modules/catalogue-admin/catalogue-admin.
   imports: [
     ConfigModule.forRoot({
       isGlobal: true,
-      envFilePath: resolve(process.cwd(), 'apps/skv-web-api/.env'),
+      envFilePath: resolve(process.cwd(), 'apps/ssg-web-api/.env'),
       validate: validateEnvironment,
     }),
     PrismaModule,

@@ -1,3 +1,4 @@
+# Preserve the existing database container and volume identity after the app rename.
 name: skv-web-api
 
 services:

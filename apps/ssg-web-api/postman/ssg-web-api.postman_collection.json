@@ -1,7 +1,7 @@
 {
   "info": {
     "_postman_id": "c70e9263-113e-44d2-8b14-bd9a1f1960f8",
-    "name": "SKV Web API - Implemented Endpoints",
+    "name": "SSG Web API - Implemented Endpoints",
     "description": "Requests for implemented public endpoints through step 105, admin catalogue list/detail (134/135), and catalogue import preflight (138). Set baseUrl and frontendOrigin for your local environment. Admin catalogue endpoints can read drafts without a public origin, media CDN, verified stock or publication. For local admin access, enable DEV_STAFF_AUTH_ENABLED and configure two 32+ character secrets, then set matching devStaffAuthToken and devStaffCsrfToken variables. The enabled staff Principal needs catalogue_read for browsing and catalogue_edit for importing. Existing development Principals are not automatically granted new permissions. This adapter is rejected in production. Import accepts five-sheet JSON, not XLSX uploads; public endpoints still exclude drafts.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
