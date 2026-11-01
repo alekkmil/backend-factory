@@ -43,6 +43,7 @@ start_app() {
 health_check() {
   local expected_release="$1"
   local attempt
+  local response
   for attempt in {1..30}; do
     if pm2 jlist | node -e '
       let s="";process.stdin.on("data",d=>s+=d);
@@ -50,14 +51,29 @@ health_check() {
         p=>p.name===process.argv[1]&&p.pm2_env.status==="online"&&
           p.pm2_env.pm_cwd===process.argv[2]
       )?0:1));
-    ' "$app" "$expected_release" &&
-      curl --fail --silent --max-time 5 "http://127.0.0.1:$port$health_path" |
-        node -e 'let s="";process.stdin.on("data",d=>s+=d);process.stdin.on("end",()=>{const h=JSON.parse(s);process.exit(h.status==="ok"?0:1)});'; then
-      return 0
+    ' "$app" "$expected_release"; then
+      if response="$(curl --fail --silent --show-error --max-time 5 "http://127.0.0.1:$port$health_path")"; then
+        if printf '%s' "$response" | node -e '
+          let s="";process.stdin.on("data",d=>s+=d);
+          process.stdin.on("end",()=>{
+            let h;
+            try { h=JSON.parse(s); }
+            catch { console.error("Health endpoint returned empty or invalid JSON.");process.exit(1); }
+            if(h?.status!=="ok") {
+              console.error("Health endpoint did not report status ok.");process.exit(1);
+            }
+          });
+        '; then
+          return 0
+        fi
+      fi
+    else
+      echo "PM2 process $app is not online in the expected release (attempt $attempt/30)." >&2
     fi
     sleep 2
   done
   echo "Health check failed for $app" >&2
+  echo "Inspect the application's PM2 error/output logs on the server; logs are retained after process deletion." >&2
   return 1
 }
 
