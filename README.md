@@ -113,6 +113,10 @@ partially applied SQL. Resolve migration failures explicitly before redeploying.
 Old releases are retained for recovery; periodically remove only confirmed
 inactive releases to manage disk usage. Inspect service logs on the server,
 not public action logs, since they can contain operational details.
+If deployment fails its health check, inspect the application's retained PM2
+error/output logs under the deployment user's `PM2_HOME` (usually `~/.pm2/logs`).
+The action reports connection/HTTP failures without printing response bodies;
+a PM2 `online` status alone does not prove the application finished startup.
 
 To add another application, create its own direct workflow, GitHub environment,
 server directory and unique PM2 process name (derived from the application name).
