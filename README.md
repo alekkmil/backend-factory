@@ -45,6 +45,10 @@ repository's installed Prisma version. No Docker, AWS access keys, or source
 checkout on the server is needed.
 The webpack build already generates the runtime lockfile; this workflow does
 not use the separate Nx `prune` target.
+The SSG webpack configuration explicitly includes `@prisma/client` as a runtime
+dependency because the generated Prisma Client's runtime import is not inferred
+by Nx's project graph. Packaging checks literal external imports in the compiled
+bundle against the isolated runtime installation before uploading a release.
 
 One-time server setup (Ubuntu Lightsail with a static public IP):
 
