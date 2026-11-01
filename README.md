@@ -31,7 +31,11 @@ Pushes to `dev` that change this application, shared libraries/tooling, or root
 build configuration run
 [Deploy ssg-web-api (dev)](.github/workflows/deploy-ssg-web-api-dev.yml).
 Manual runs must also select `dev`; other branches do not deploy.
-The [reusable workflow](.github/workflows/deploy-lightsail.yml) builds with Nx,
+The deployment runs as a direct job with `environment: ssg-web-api-dev` and reads
+its environment secrets through `${{ secrets.NAME }}`. No repository-secret
+copies or `secrets: inherit` are required. It validates that all five secrets
+are available before installing dependencies, without printing their values.
+The workflow builds with Nx,
 ships only compiled output and its generated runtime manifest/lockfile over
 verified SSH, installs production dependencies on the server, applies pending
 Prisma migrations, and starts/restarts the application's PM2 process.
@@ -90,8 +94,9 @@ branches to `dev`, and add these **environment secrets**:
 without `export` or variable interpolation. Start from the application's
 [environment example](apps/ssg-web-api/.env.example), set `PORT=3001`, configure
 the dev database and frontend CORS origin, and replace all example credentials.
-Use `NODE_ENV=production` for safe hosted defaults even on the `dev` branch;
-the development staff-auth adapter and local outbox worker are then disabled.
+For this development instance, use `NODE_ENV=development` and keep
+`DEV_STAFF_AUTH_ENABLED=false` and `OUTBOX_WORKER_ENABLED=false` unless those
+development features are explicitly configured.
 Real production staff authentication is not implemented by this deployment.
 If local capture is intentionally enabled in a development environment, keep
 its private directory under `/srv/ssg-web-api/shared`, never in a release
@@ -109,13 +114,17 @@ Old releases are retained for recovery; periodically remove only confirmed
 inactive releases to manage disk usage. Inspect service logs on the server,
 not public action logs, since they can contain operational details.
 
-To add another application, create its own caller workflow, GitHub environment,
+To add another application, create its own direct workflow, GitHub environment,
 server directory and unique PM2 process name (derived from the application name).
-Call the reusable workflow with its Nx
-application name, environment, port and health path. The application must emit
+Use the SSG workflow as a starting point, updating its name, app path filter,
+branch guard, concurrency group, environment, `APP`, `APP_PORT`, `HEALTH_PATH`,
+and secret-validation environment name. Reuse
+[the server deployment script](tools/deploy/lightsail.sh) and
+[PM2 ecosystem config](tools/deploy/ecosystem.config.cjs).
+The application must emit
 `main.js`, `package.json`, and `package-lock.json` under `dist/apps/<name>` and
 provide a health endpoint returning HTTP 2xx with `{"status":"ok"}`.
-It must also own a Prisma config and migration directory, since the reusable
+It must also own a Prisma config and migration directory, since the deployment
 workflow runs migrations for each deployment.
 Keep every application's database, secrets and process isolated.
 
