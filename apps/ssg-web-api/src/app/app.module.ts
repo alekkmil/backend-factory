@@ -15,6 +15,8 @@ import { GuestSessionModule } from './modules/guest-session/guest-session.module
 import { ProductReadModule } from './modules/products/product-read.module';
 import { CatalogueImportModule } from './modules/catalogue-import/catalogue-import.module';
 import { CatalogueAdminModule } from './modules/catalogue-admin/catalogue-admin.module';
+import { EnquiryModule } from './modules/enquiries/enquiry.module';
+import { SearchModule } from './modules/search/search.module';
 
 @Module({
   imports: [
@@ -33,6 +35,8 @@ import { CatalogueAdminModule } from './modules/catalogue-admin/catalogue-admin.
     ProductReadModule,
     CatalogueImportModule,
     CatalogueAdminModule,
+    EnquiryModule,
+    SearchModule,
     HealthModule,
     DictionaryModule,
   ],

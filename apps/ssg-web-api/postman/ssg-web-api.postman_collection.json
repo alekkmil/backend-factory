@@ -2,7 +2,7 @@
   "info": {
     "_postman_id": "c70e9263-113e-44d2-8b14-bd9a1f1960f8",
     "name": "SSG Web API - Implemented Endpoints",
-    "description": "Requests for implemented public endpoints through step 105, admin catalogue list/detail (134/135), and catalogue import preflight (138). Set baseUrl and frontendOrigin for your local environment. Admin catalogue endpoints can read drafts without a public origin, media CDN, verified stock or publication. For local admin access, enable DEV_STAFF_AUTH_ENABLED and configure two 32+ character secrets, then set matching devStaffAuthToken and devStaffCsrfToken variables. The enabled staff Principal needs catalogue_read for browsing and catalogue_edit for importing. Existing development Principals are not automatically granted new permissions. This adapter is rejected in production. Import accepts five-sheet JSON, not XLSX uploads; public endpoints still exclude drafts.",
+    "description": "Implemented public catalogue/product endpoints, search (113), guest enquiries (116/117), admin catalogue reads (134/135), and catalogue import preflight (138). Set baseUrl and frontendOrigin. Run guest bootstrap first for enquiries; it saves guestCsrfToken and sets a Secure cookie, requiring HTTPS outside supported localhost clients. Preserve enquiryRequestId and the exact payload on retries; regenerate it only for an intentional new submission. Email notifications use durable private dev capture, not real delivery. Admin drafts do not require published stock/media. Dev staff authentication requires explicit opt-in, two 32+ character secrets and appropriate live staff permissions; it is rejected in production. Import accepts nested product JSON with backend-generated SSG IDs, not XLSX uploads; public endpoints exclude drafts.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "variable": [
@@ -50,6 +50,31 @@
       "key": "devStaffCsrfToken",
       "value": "",
       "type": "string"
+    },
+    {
+      "key": "guestCsrfToken",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "enquiryRequestId",
+      "value": "44444444-4444-4444-8444-444444444444",
+      "type": "string"
+    },
+    {
+      "key": "publishRequestId",
+      "value": "55555555-5555-4555-8555-555555555555",
+      "type": "string"
+    },
+    {
+      "key": "productVersion",
+      "value": "2",
+      "type": "string"
+    },
+    {
+      "key": "draftRevisionId",
+      "value": "22222222-2222-4222-8222-222222222222",
+      "type": "string"
     }
   ],
   "item": [
@@ -73,6 +98,19 @@
       "item": [
         {
           "name": "Create or resume guest session",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "  pm.collectionVariables.set('guestCsrfToken', pm.response.json().csrf_token);",
+                  "}"
+                ]
+              }
+            }
+          ],
           "request": {
             "method": "POST",
             "header": [
@@ -98,6 +136,59 @@
             },
             "url": "{{baseUrl}}/api/guest-session",
             "description": "Returns a CSRF token and expiry, and sets an HttpOnly Secure session cookie. The Origin must match a configured CORS_ORIGINS value. Keep the cookie in Postman's cookie jar for subsequent protected requests."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Search and enquiries",
+      "item": [
+        {
+          "name": "Search published products and content",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/search?locale={{locale}}&q=gold&product_page=1&content_page=1&page_size=24",
+            "description": "Localized literal substring search. Independent groups contain items/total/page/page_size. Empty q returns empty groups; unknown query fields are rejected."
+          },
+          "response": []
+        },
+        {
+          "name": "Submit general enquiry",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Origin", "value": "{{frontendOrigin}}", "type": "text" },
+              { "key": "X-CSRF-Token", "value": "{{guestCsrfToken}}", "type": "text" },
+              { "key": "Content-Type", "value": "application/json", "type": "text" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"request_id\": \"{{enquiryRequestId}}\",\n  \"request_type\": \"general\",\n  \"name\": \"Example Customer\",\n  \"email\": \"customer@example.com\",\n  \"topic\": \"Product enquiry\",\n  \"message\": \"Please contact me about your jewellery.\",\n  \"language\": \"{{locale}}\",\n  \"origin_route_id\": \"R050\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": "{{baseUrl}}/api/enquiries",
+            "description": "Bootstrap a guest first and retain its Secure cookie. Requires server-configured coordinatorEmail. Returns 201/new or 200/same-payload replay; changed payload with the same request ID returns 409. Callback/similar requests require international phone; similar also requires published jewellery product context. Notifications are queued for private dev capture, not real email delivery."
+          },
+          "response": []
+        },
+        {
+          "name": "Recover enquiry attempt status",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Origin", "value": "{{frontendOrigin}}", "type": "text" },
+              { "key": "X-CSRF-Token", "value": "{{guestCsrfToken}}", "type": "text" },
+              { "key": "Content-Type", "value": "application/json", "type": "text" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"request_id\": \"{{enquiryRequestId}}\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": "{{baseUrl}}/api/enquiries/attempt-status",
+            "description": "Use the same guest and original request ID after a timeout. Returns only received/reference or unknown_result. Does not resubmit, send mail or reveal other guests' data."
           },
           "response": []
         }
@@ -365,7 +456,7 @@
               { "key": "X-CSRF-Token", "value": "{{devStaffCsrfToken}}", "type": "text" }
             ],
             "url": "{{baseUrl}}/api/admin/catalogue?publication_status=draft&page=1&page_size=24",
-            "description": "Requires live catalogue_read permission. Supports optional q (SSG ID or BG/EN draft/current title), publication_status (draft/published/hidden), page and page_size (1..100). Omit publication_status to list all states. Response: items, total, page, page_size. Draft names take precedence over current published names. Copy an item UUID into productId for the detail request. Response is private, no-store."
+            "description": "Requires the configured development staff token pair and allowed Origin; no database permission grant. Supports optional q (SSG ID or BG/EN draft/current title), publication_status (draft/published/hidden), page and page_size (1..100). Omit publication_status to list all states. Response: items, total, page, page_size. Draft names take precedence over current published names. Copy an item UUID into productId for the detail request. Response is private, no-store."
           },
           "response": []
         },
@@ -379,7 +470,32 @@
               { "key": "X-CSRF-Token", "value": "{{devStaffCsrfToken}}", "type": "text" }
             ],
             "url": "{{baseUrl}}/api/admin/catalogue/{{productId}}",
-            "description": "Requires catalogue_read. Returns AdminProduct: draft and matching draft_revision_id (both nullable), published_revision_id, slug_preview, verified units, deduplicated staged_unit_count and actionable validation_errors. No query parameters. Does not create drafts, publish, activate media or promote staged units. Validation errors are read-time checks, not a successful byte-verified publication preflight. Missing UUID returns 404; malformed UUID/unknown query returns 400."
+            "description": "Requires the configured development staff token pair and allowed Origin; no database permission grant. Returns AdminProduct: draft and matching draft_revision_id (both nullable), published_revision_id, slug_preview, verified units, deduplicated staged_unit_count and actionable validation_errors. No query parameters. Does not create drafts, publish, activate media or promote staged units. Validation errors are read-time checks, not a successful byte-verified publication preflight. Missing UUID returns 404; malformed UUID/unknown query returns 400."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Catalogue publication",
+      "item": [
+        {
+          "name": "Publish exact current draft (development only)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Origin", "value": "{{frontendOrigin}}", "type": "text" },
+              { "key": "Content-Type", "value": "application/json", "type": "text" },
+              { "key": "X-Dev-Staff-Token", "value": "{{devStaffAuthToken}}", "type": "text" },
+              { "key": "X-CSRF-Token", "value": "{{devStaffCsrfToken}}", "type": "text" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"request_id\": \"{{publishRequestId}}\",\n  \"expected_version\": {{productVersion}},\n  \"revision_id\": \"{{draftRevisionId}}\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": "{{baseUrl}}/api/admin/catalogue/{{productId}}/publish",
+            "description": "Set productVersion and draftRevisionId from the current admin detail response. Requires explicit DEV_CATALOGUE_PUBLISH_ENABLED=true, valid public site/CDN configuration, the configured development staff token pair and allowed Origin, and approved media already registered and attached. No database permission grant. Does not upload/register/approve/attach media or inspect actual files. Development metadata-only publication is rejected in production. Image-less drafts fail MEDIA_NOT_READY. Reuse publishRequestId and the exact payload on retries; changed payload returns 409. Archive exits additionally require confirm_archive_exit:true and a reviewed draft reason/note. Success200 returns AdminProduct with draft consumed and published_revision_id set."
           },
           "response": []
         }
@@ -387,6 +503,7 @@
     },
     {
       "name": "Catalogue import",
+      "description": "Development upload-to-publish example: use the sibling local-media-import.example.json as the preflight request body. With DEV_CATALOGUE_PUBLISH_ENABLED=true outside production, explicit images[].derivatives metadata is registered and attached atomically during commit. Each image needs four square WebP entries (200/400/800/1600), bytes/hash, BG/EN alt and review_status approved; all share one version. This is metadata-only development approval, not file verification or upload. Synthetic example sizes/hashes do not represent actual files. Commit leaves a draft; read admin detail and publish explicitly. Without derivatives, existing registered-media lookup behavior is unchanged.",
       "item": [
         {
           "name": "Stage catalogue import (preflight)",
@@ -416,7 +533,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"request_id\": \"{{requestId}}\",\n  \"data\": {\n    \"products\": [],\n    \"units\": [],\n    \"materials\": [],\n    \"images\": [],\n    \"legacy_links\": []\n  }\n}",
+              "raw": "{\n  \"request_id\": \"{{requestId}}\",\n  \"data\": {\n    \"products\": [\n      {\n        \"product_type\": \"jewellery\",\n        \"jewellery_type\": \"brooch\",\n        \"name_bg\": \"Example brooch BG\",\n        \"name_en\": \"Example brooch\",\n        \"description_bg\": \"Synthetic draft description BG.\",\n        \"description_en\": \"Synthetic draft description.\",\n        \"materials_state\": \"unknown\",\n        \"gemstones_state\": \"unknown\",\n        \"gemstone_codes\": [],\n        \"requested_sales_mode\": \"enquiry_only\",\n        \"requested_price_visibility\": \"hidden\",\n        \"fulfilment_methods\": [],\n        \"delivery_locality_ids\": [],\n        \"pickup_location_codes\": [],\n        \"change_reason_code\": \"data_check\",\n        \"change_reason_note\": \"Synthetic draft only.\",\n        \"units\": [],\n        \"materials\": [],\n        \"images\": [],\n        \"legacy_links\": []\n      }\n    ]\n  }\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -424,7 +541,7 @@
               }
             },
             "url": "{{baseUrl}}/api/admin/catalogue/imports",
-            "description": "For local development, requires DEV_STAFF_AUTH_ENABLED=true, configured 32+ character server secrets, an allowed Origin, and the matching X-Dev-Staff-Token/X-CSRF-Token collection variables. The API resolves its fixed development Principal and checks its live enabled state and catalogue_edit permission; callers cannot supply a Principal ID or role. The adapter is disabled in production. Replace the arrays with JSON rows corresponding to the workbook sheets. Empty input creates an invalid preflight report; it never creates products, publishes content, registers media, or activates stock. Same actor/request_id with a changed payload returns 409."
+            "description": "Requires the configured development staff token pair and allowed Origin; no database permission grant. New imports use data.products with units/materials/images/legacy_links nested in each product; all four arrays are required, even when empty. Do not send ssg_id anywhere or sibling sheet arrays. Backend-generated SSG-XXXXXXXX IDs are returned in products in input order; retain them and batch_id for commit with version:null. Same actor/request_id/payload returns the same IDs; changed payload returns 409. This is a new-product import, not an update-by-SSG-ID. Existing staged batches remain committable with their original IDs. Preflight never creates catalogue products, publishes, registers media or activates stock."
           },
           "response": []
         }

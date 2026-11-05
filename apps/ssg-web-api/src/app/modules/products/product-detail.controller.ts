@@ -1,4 +1,4 @@
-import { Controller, Get, Param, Query } from '@nestjs/common';
+import { Controller, Get, Header, Param, Query } from '@nestjs/common';
 import { ProductPathDto, ProductQueryDto } from './product-detail.dto';
 import { fulfilmentContext } from './fulfilment-context';
 import { ProductReadService } from './product-read.service';
@@ -8,6 +8,7 @@ export class ProductDetailController {
   constructor(private readonly products: ProductReadService) {}
 
   @Get(':id')
+  @Header('Cache-Control', 'no-store')
   detail(
     @Param() path: ProductPathDto,
     @Query() query: ProductQueryDto,

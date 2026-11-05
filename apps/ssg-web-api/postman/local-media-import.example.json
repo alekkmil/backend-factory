@@ -1,0 +1,83 @@
+{
+  "request_id": "71bb9ae4-855b-4ccb-99ef-a4ed162f43c1",
+  "data": {
+    "products": [
+      {
+        "product_type": "jewellery",
+        "jewellery_type": "brooch",
+        "name_bg": "Тестова брошка",
+        "name_en": "Local test brooch with media",
+        "description_bg": "Тестов продукт за локална проверка на каталога.",
+        "description_en": "Synthetic local catalogue fixture, not verified stock or media.",
+        "materials_state": "unknown",
+        "gemstones_state": "unknown",
+        "gemstone_codes": [],
+        "requested_sales_mode": "archive_catalogue",
+        "requested_price_visibility": "hidden",
+        "fulfilment_methods": [],
+        "delivery_locality_ids": [],
+        "pickup_location_codes": [],
+        "change_reason_code": "data_check",
+        "change_reason_note": "Synthetic local test; image sizes and hashes are fixture values, not verified file facts.",
+        "units": [],
+        "materials": [],
+        "legacy_links": [],
+        "images": [
+          {
+            "image_id": "01",
+            "version": "local-v1",
+            "role": "main",
+            "sort_order": 1,
+            "alt_bg": "Тестова брошка",
+            "alt_en": "Local test brooch",
+            "review_status": "approved",
+            "processed_with_ai": "no",
+            "on_model_illustrative": "no",
+            "derivatives": [
+              {
+                "size": 200,
+                "width": 200,
+                "height": 200,
+                "object_key": "local-test/brooch/01-200.webp",
+                "mime": "image/webp",
+                "colour_space": "sRGB",
+                "bytes": 100,
+                "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+              },
+              {
+                "size": 400,
+                "width": 400,
+                "height": 400,
+                "object_key": "local-test/brooch/01-400.webp",
+                "mime": "image/webp",
+                "colour_space": "sRGB",
+                "bytes": 100,
+                "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+              },
+              {
+                "size": 800,
+                "width": 800,
+                "height": 800,
+                "object_key": "local-test/brooch/01-800.webp",
+                "mime": "image/webp",
+                "colour_space": "sRGB",
+                "bytes": 100,
+                "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+              },
+              {
+                "size": 1600,
+                "width": 1600,
+                "height": 1600,
+                "object_key": "local-test/brooch/01-1600.webp",
+                "mime": "image/webp",
+                "colour_space": "sRGB",
+                "bytes": 100,
+                "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

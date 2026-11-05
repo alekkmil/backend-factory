@@ -3,19 +3,15 @@ import {
   ExecutionContext,
   ForbiddenException,
   Injectable,
-  SetMetadata,
   ServiceUnavailableException,
   UnauthorizedException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { Reflector } from '@nestjs/core';
 import { Prisma } from '../../../generated/prisma/client';
-import type { Permission } from '../../../generated/prisma/enums';
 import { createHash, timingSafeEqual } from 'node:crypto';
 import type { Request, Response } from 'express';
 import { PrismaService } from '../../database/prisma.service';
 
-const STAFF_PERMISSION = 'staffPermission';
 const DEV_STAFF_SUBJECT = 'local-dev:catalogue-import';
 
 export interface StaffAuthContext {
@@ -27,15 +23,11 @@ export interface StaffAuthenticatedRequest extends Request {
   staffAuth?: StaffAuthContext;
 }
 
-export const RequireStaffPermission = (permission: Permission) =>
-  SetMetadata(STAFF_PERMISSION, permission);
-
 @Injectable()
-export class StaffPermissionGuard implements CanActivate {
+export class StaffTokenGuard implements CanActivate {
   private devPrincipalId: string | null = null;
 
   constructor(
-    private readonly reflector: Reflector,
     private readonly prisma: PrismaService,
     private readonly config: ConfigService,
   ) {}
@@ -46,24 +38,11 @@ export class StaffPermissionGuard implements CanActivate {
     const response = http.getResponse<Response>();
     response.setHeader('Cache-Control', 'private, no-store');
 
-    const auth = await this.resolveStaffAuth(request);
-    request.staffAuth = auth;
-
-    const permission = this.reflector.getAllAndOverride<Permission>(
-      STAFF_PERMISSION,
-      [context.getHandler(), context.getClass()],
-    );
-    if (!permission) {
-      throw new ForbiddenException({
-        code: 'FORBIDDEN',
-        message_key: 'errors.forbidden',
-      });
-    }
-
     try {
+      const auth = await this.resolveStaffAuth(request);
       const principal = await this.prisma.principal.findUnique({
         where: { id: auth.principalId },
-        select: { kind: true, enabled: true, permissions: true },
+        select: { kind: true, enabled: true },
       });
       if (!principal || principal.kind !== 'staff' || !principal.enabled) {
         throw new UnauthorizedException({
@@ -71,12 +50,7 @@ export class StaffPermissionGuard implements CanActivate {
           message_key: 'errors.access_unavailable',
         });
       }
-      if (!principal.permissions.includes(permission)) {
-        throw new ForbiddenException({
-          code: 'FORBIDDEN',
-          message_key: 'errors.forbidden',
-        });
-      }
+      request.staffAuth = auth;
       return true;
     } catch (error) {
       if (
@@ -102,17 +76,10 @@ export class StaffPermissionGuard implements CanActivate {
   private async resolveStaffAuth(
     request: StaffAuthenticatedRequest,
   ): Promise<StaffAuthContext> {
-    if (request.staffAuth) {
-      if (!request.staffAuth.principalId) {
-        throw this.unauthorized();
-      }
-      if (!request.staffAuth.csrfValidated) {
-        throw this.forbidden();
-      }
-      return request.staffAuth;
-    }
-
-    if (!this.config.get<boolean>('DEV_STAFF_AUTH_ENABLED')) {
+    if (
+      this.config.get<string>('NODE_ENV') === 'production' ||
+      !this.config.get<boolean>('DEV_STAFF_AUTH_ENABLED')
+    ) {
       throw this.unauthorized();
     }
     const authToken = request.get('x-dev-staff-token');
@@ -152,7 +119,6 @@ export class StaffPermissionGuard implements CanActivate {
           externalSubject: DEV_STAFF_SUBJECT,
           kind: 'staff',
           displayName: 'Local development catalogue importer',
-          permissions: ['catalogue_read', 'catalogue_edit'],
         },
         select: { id: true },
       });

@@ -14,10 +14,17 @@ const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 function isRetryableTransactionError(error: unknown): boolean {
-  return (
-    error instanceof Prisma.PrismaClientKnownRequestError &&
-    error.code === 'P2034'
-  );
+  if (!(error instanceof Prisma.PrismaClientKnownRequestError)) return false;
+  if (error.code === 'P2034') return true;
+  if (error.code !== 'P2010') return false;
+  const isRetryableSqlState = (code: unknown) => code === '40001' || code === '40P01';
+  if (isRetryableSqlState(error.meta?.code)) return true;
+  // The pg adapter wraps raw FOR UPDATE conflicts in P2010.
+  const adapter = error.meta?.driverAdapterError;
+  if (!adapter || typeof adapter !== 'object' || !('cause' in adapter)) return false;
+  const cause = adapter.cause;
+  return !!cause && typeof cause === 'object' && 'originalCode' in cause &&
+    isRetryableSqlState(cause.originalCode);
 }
 
 function canonicalValue(value: unknown): string {

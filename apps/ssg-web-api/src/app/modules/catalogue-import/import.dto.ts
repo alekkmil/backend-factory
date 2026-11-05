@@ -5,6 +5,7 @@ import {
   IsArray,
   IsDefined,
   IsInt,
+  IsIn,
   IsOptional,
   IsObject,
   IsString,
@@ -17,11 +18,7 @@ import {
   ValidateNested,
 } from 'class-validator';
 
-export class ImportProductRowDto {
-  @IsString()
-  @MaxLength(40)
-  ssg_id!: string;
-
+class ImportProductFieldsDto {
   @IsOptional()
   @IsString()
   @MaxLength(80)
@@ -122,11 +119,7 @@ export class ImportProductRowDto {
   change_reason_note?: string | null;
 }
 
-export class ImportUnitRowDto {
-  @IsString()
-  @MaxLength(40)
-  ssg_id!: string;
-
+class ImportUnitFieldsDto {
   @IsOptional()
   @IsString()
   @MaxLength(128)
@@ -213,11 +206,7 @@ export class ImportUnitRowDto {
   source_ref?: string | null;
 }
 
-export class ImportMaterialRowDto {
-  @IsString()
-  @MaxLength(40)
-  ssg_id!: string;
-
+class ImportMaterialFieldsDto {
   @IsOptional()
   @IsString()
   @MaxLength(80)
@@ -234,10 +223,49 @@ export class ImportMaterialRowDto {
   gold_karat_code?: string | null;
 }
 
-export class ImportImageRowDto {
+export class ImportImageDerivativeDto {
+  @IsIn([200, 400, 800, 1600])
+  size!: number;
+
+  @IsInt()
+  @Min(200)
+  @Max(1600)
+  width!: number;
+
+  @IsInt()
+  @Min(200)
+  @Max(1600)
+  height!: number;
+
   @IsString()
-  @MaxLength(40)
-  ssg_id!: string;
+  @MaxLength(1000)
+  @Matches(/^[^\\%?#]+$/)
+  object_key!: string;
+
+  @IsIn(['image/webp'])
+  mime!: string;
+
+  @IsIn(['sRGB'])
+  colour_space!: string;
+
+  @IsInt()
+  @Min(1)
+  @Max(Number.MAX_SAFE_INTEGER)
+  bytes!: number;
+
+  @IsString()
+  @Matches(/^[a-f0-9]{64}$/)
+  sha256!: string;
+}
+
+class ImportImageFieldsDto {
+  @ValidateIf((_object, value: unknown) => value !== undefined)
+  @IsArray()
+  @ArrayMinSize(4)
+  @ArrayMaxSize(4)
+  @ValidateNested({ each: true })
+  @Type(() => ImportImageDerivativeDto)
+  derivatives?: ImportImageDerivativeDto[];
 
   @IsOptional()
   @IsString()
@@ -311,11 +339,7 @@ export class ImportImageRowDto {
   webp_200_path?: string | null;
 }
 
-export class ImportLegacyLinkRowDto {
-  @IsString()
-  @MaxLength(40)
-  ssg_id!: string;
-
+class ImportLegacyLinkFieldsDto {
   @IsOptional()
   @IsString()
   @MaxLength(255)
@@ -345,6 +369,75 @@ export class ImportLegacyLinkRowDto {
   @IsString()
   @MaxLength(2000)
   source_ref?: string | null;
+}
+
+export class ImportProductRowDto extends ImportProductFieldsDto {
+  @IsString()
+  @MaxLength(40)
+  ssg_id!: string;
+}
+
+export class ImportUnitRowDto extends ImportUnitFieldsDto {
+  @IsString()
+  @MaxLength(40)
+  ssg_id!: string;
+}
+
+export class ImportMaterialRowDto extends ImportMaterialFieldsDto {
+  @IsString()
+  @MaxLength(40)
+  ssg_id!: string;
+}
+
+export class ImportImageRowDto extends ImportImageFieldsDto {
+  @IsString()
+  @MaxLength(40)
+  ssg_id!: string;
+}
+
+export class ImportLegacyLinkRowDto extends ImportLegacyLinkFieldsDto {
+  @IsString()
+  @MaxLength(40)
+  ssg_id!: string;
+}
+
+export class ImportNestedProductDto extends ImportProductFieldsDto {
+  @IsArray()
+  @ArrayMaxSize(10000)
+  @IsObject({ each: true })
+  @ValidateNested({ each: true })
+  @Type(() => ImportUnitFieldsDto)
+  units!: ImportUnitFieldsDto[];
+
+  @IsArray()
+  @ArrayMaxSize(10000)
+  @IsObject({ each: true })
+  @ValidateNested({ each: true })
+  @Type(() => ImportMaterialFieldsDto)
+  materials!: ImportMaterialFieldsDto[];
+
+  @IsArray()
+  @ArrayMaxSize(10000)
+  @IsObject({ each: true })
+  @ValidateNested({ each: true })
+  @Type(() => ImportImageFieldsDto)
+  images!: ImportImageFieldsDto[];
+
+  @IsArray()
+  @ArrayMaxSize(10000)
+  @IsObject({ each: true })
+  @ValidateNested({ each: true })
+  @Type(() => ImportLegacyLinkFieldsDto)
+  legacy_links!: ImportLegacyLinkFieldsDto[];
+}
+
+export class ImportNestedPayloadDto {
+  @IsArray()
+  @ArrayMaxSize(1000)
+  @IsObject({ each: true })
+  @ValidateNested({ each: true })
+  @Type(() => ImportNestedProductDto)
+  products!: ImportNestedProductDto[];
 }
 
 export class ImportProductPayloadDto {
@@ -393,13 +486,13 @@ export class ImportPreflightRequestDto {
   @IsDefined()
   @IsObject()
   @ValidateNested()
-  @Type(() => ImportProductPayloadDto)
-  data!: ImportProductPayloadDto;
+  @Type(() => ImportNestedPayloadDto)
+  data!: ImportNestedPayloadDto;
 }
 
 export class ImportExpectedProductVersionDto {
   @IsString()
-  @Matches(/^SSG-\d{6,}$/)
+  @Matches(/^SSG-(?:[A-F0-9]{8}|\d{6,})$/)
   @MaxLength(40)
   ssg_id!: string;
 
@@ -417,7 +510,7 @@ export class ImportCommitRequestDto {
   @ArrayMinSize(1)
   @ArrayMaxSize(50)
   @IsString({ each: true })
-  @Matches(/^SSG-\d{6,}$/, { each: true })
+  @Matches(/^SSG-(?:[A-F0-9]{8}|\d{6,})$/, { each: true })
   @MaxLength(40, { each: true })
   ssg_ids!: string[];
 

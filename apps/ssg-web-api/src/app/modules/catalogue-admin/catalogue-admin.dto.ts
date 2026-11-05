@@ -1,5 +1,5 @@
 import { Transform } from 'class-transformer';
-import { IsIn, IsInt, IsString, Max, MaxLength, Min, ValidateIf } from 'class-validator';
+import { Equals, IsIn, IsInt, IsString, IsUUID, Max, MaxLength, Min, ValidateIf } from 'class-validator';
 import { PublicationStatus } from '../../../generated/prisma/enums';
 import type {
   CompositionState, DeliveryScope, FulfilmentMethod, LocationCode, PriceVisibility,
@@ -35,6 +35,23 @@ export class CatalogueListQueryDto {
 }
 
 export class CatalogueDetailQueryDto {}
+
+export class CataloguePublishDto {
+  @IsUUID()
+  request_id!: string;
+
+  @IsInt()
+  @Min(1)
+  @Max(2147483646)
+  expected_version!: number;
+
+  @IsUUID()
+  revision_id!: string;
+
+  @ValidateIf((_object, value: unknown) => value !== undefined)
+  @Equals(true)
+  confirm_archive_exit?: true;
+}
 
 export interface CatalogueFieldError {
   field: string;

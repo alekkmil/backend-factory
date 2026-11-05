@@ -22,12 +22,17 @@ async function bootstrap(): Promise<void> {
 
   const config = app.get(ConfigService);
   const port = config.getOrThrow<number>('PORT');
+  if (config.get<string>('TRUST_PROXY') === 'loopback') {
+    app.set('trust proxy', 'loopback');
+  }
 
   app.setGlobalPrefix('api', {
     exclude: [{ path: 'internal/health', method: RequestMethod.GET }],
   });
   app.enableCors({
     origin: config.getOrThrow<string>('CORS_ORIGINS').split(','),
+    credentials: true,
+    exposedHeaders: ['X-Request-ID'],
   });
   app.useGlobalPipes(
     new ValidationPipe({

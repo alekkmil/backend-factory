@@ -10,7 +10,9 @@ import type {
   AdminCatalogueList, AdminProduct, CatalogueFieldError, CatalogueListQueryDto, ProductDraft,
 } from './catalogue-admin.dto';
 
-const DICTIONARY_SELECT = { code: true, group: true, active: true } satisfies Prisma.DictionaryEntrySelect;
+const DICTIONARY_SELECT = {
+  code: true, group: true, active: true, appliesTo: true,
+} satisfies Prisma.DictionaryEntrySelect;
 const TRANSLATIONS_SELECT = {
   locale: true, name: true, description: true,
 } satisfies Prisma.ProductTranslationSelect;
@@ -120,13 +122,21 @@ export class CatalogueAdminService {
   }
 
   async detail(id: string): Promise<AdminProduct> {
-    return this.read(async (transaction) => {
+    return this.read((transaction) => this.detailInTransaction(transaction, id));
+  }
+
+  async detailInTransaction(transaction: Prisma.TransactionClient, id: string): Promise<AdminProduct> {
       const product = await transaction.product.findUnique({
         where: { id },
         select: {
           id: true, ssgId: true, publicUrlId: true, productType: true,
           publicationStatus: true, version: true, currentRevisionId: true,
-          currentRevisionIdRelation: { select: { state: true } },
+          currentRevisionIdRelation: {
+            select: {
+              state: true,
+              from_ProductTranslation_revisionId: { select: TRANSLATIONS_SELECT },
+            },
+          },
           from_ProductRevision_productId: {
             where: { state: 'draft' }, orderBy: { revisionNumber: 'desc' }, take: 2,
             select: REVISION_SELECT,
@@ -149,9 +159,14 @@ export class CatalogueAdminService {
       const revision = product.from_ProductRevision_productId[0];
       const errors: CatalogueFieldError[] = [];
       const draft = revision ? this.draft(product.productType, revision) : null;
+      const currentTexts = product.currentRevisionIdRelation?.from_ProductTranslation_revisionId;
       const slug = {
-        bg: catalogueSlugPreview(draft?.name_bg ?? null, 'bg'),
-        en: catalogueSlugPreview(draft?.name_en ?? null, 'en'),
+        bg: catalogueSlugPreview(
+          draft ? draft.name_bg : currentTexts?.find((text) => text.locale === 'bg')?.name ?? null, 'bg',
+        ),
+        en: catalogueSlugPreview(
+          draft ? draft.name_en : currentTexts?.find((text) => text.locale === 'en')?.name ?? null, 'en',
+        ),
       };
       if (revision && draft) this.validateDraft(product.id, draft, revision, slug, errors);
       const claimed = new Set(product.from_BarcodeIdentity_productId.map((identity) => identity.barcode));
@@ -173,7 +188,6 @@ export class CatalogueAdminService {
         }),
         staged_unit_count: staged, validation_errors: errors,
       };
-    });
   }
 
   private draft(productType: ProductDraft['product_type'], revision: Revision): ProductDraft {
@@ -214,18 +228,20 @@ export class CatalogueAdminService {
       if (!slug[locale] || slug[locale].length > 180) add(`slug_preview.${locale}`);
     }
     const dictionary = (
-      entry: { code: string; group: string; active: boolean } | null,
-      group: string, field: string,
+      entry: { code: string; group: string; active: boolean; appliesTo: string[] } | null,
+      group: string, field: string, applicability?: string,
     ) => {
-      if (entry && (!entry.active || entry.group !== group)) add(field);
+      if (entry && (!entry.active || entry.group !== group ||
+        (applicability && entry.appliesTo.length > 0 && !entry.appliesTo.includes(applicability)))) add(field);
     };
-    dictionary(revision.jewelleryTypeIdRelation, 'jewellery_type', 'jewellery_type');
+    dictionary(revision.jewelleryTypeIdRelation, 'jewellery_type', 'jewellery_type', draft.product_type);
     if (draft.product_type === 'jewellery' && !draft.jewellery_type) add('jewellery_type');
     if (draft.product_type === 'loose_stone' && draft.jewellery_type) add('jewellery_type');
     for (const [index, material] of revision.from_RevisionMaterial_revisionId.entries()) {
       dictionary(material.materialIdRelation, 'material', `materials.${index}.material_code`);
-      dictionary(material.finenessIdRelation, 'fineness', `materials.${index}.fineness_code`);
-      dictionary(material.goldKaratIdRelation, 'gold_karat', `materials.${index}.gold_karat_code`);
+      const applicability = `material.${material.materialIdRelation.code}`;
+      dictionary(material.finenessIdRelation, 'fineness', `materials.${index}.fineness_code`, applicability);
+      dictionary(material.goldKaratIdRelation, 'gold_karat', `materials.${index}.gold_karat_code`, applicability);
     }
     for (const [index, stone] of revision.from_RevisionGemstone_revisionId.entries()) {
       dictionary(stone.gemstoneIdRelation, 'gemstone', `gemstone_codes.${index}`);
@@ -246,7 +262,7 @@ export class CatalogueAdminService {
     const release = revision.mediaReleaseIdRelation;
     if (!release || release.productId !== productId || !release.approved) add('media_release_id', 'MEDIA_NOT_READY');
     const images = revision.from_RevisionImage_revisionId;
-    if (!images.length || images[0]?.assetIdRelation.role !== 'main' ||
+    if (!images.length || images[0]?.sortOrder !== 1 || images[0]?.assetIdRelation.role !== 'main' ||
       images.filter((image) => image.assetIdRelation.role === 'main').length !== 1) add('image_ids', 'MEDIA_NOT_READY');
     for (const [index, image] of images.entries()) {
       const asset = image.assetIdRelation;

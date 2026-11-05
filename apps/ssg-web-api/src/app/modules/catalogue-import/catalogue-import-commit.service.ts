@@ -6,6 +6,7 @@ import {
   NotFoundException,
   ServiceUnavailableException,
 } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { plainToInstance } from 'class-transformer';
 import { createHash, randomUUID } from 'node:crypto';
 import { validateSync } from 'class-validator';
@@ -28,7 +29,9 @@ import type {
   ImportCommitRequestDto,
   ImportProductPayloadDto,
 } from './import.dto';
+import { configurationUrl, projectMedia } from '../products/product-read.service';
 import type { ImportResult } from './catalogue-import.service';
+import { orderImportProducts } from './catalogue-import.service';
 import { ImportProductPayloadDto as ImportProductPayloadClass } from './import.dto';
 
 interface ImportError {
@@ -124,7 +127,10 @@ const RESTRICTION_REASONS = [
 export class CatalogueImportCommitService {
   private readonly logger = new Logger(CatalogueImportCommitService.name);
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly config: ConfigService,
+  ) {}
 
   async commit(
     actorId: string,
@@ -696,6 +702,7 @@ export class CatalogueImportCommitService {
       revision.id,
       stagedPayload,
       revisionDraft !== null,
+      actorId,
     );
     await this.persistLegacyReferences(
       transaction,
@@ -934,8 +941,13 @@ export class CatalogueImportCommitService {
     revisionId: string,
     payload: ImportProductPayloadDto,
     hasExistingDraft: boolean,
+    actorId: string,
   ): Promise<void> {
     const rows = payload.images;
+    if (rows.some((image) => image.derivatives !== undefined)) {
+      await this.registerDevelopmentMedia(transaction, productId, revisionId, rows, actorId);
+      return;
+    }
     if (!hasExistingDraft) {
       const currentRevision = await transaction.product.findUnique({
         where: { id: productId },
@@ -972,27 +984,98 @@ export class CatalogueImportCommitService {
       }
       const asset = await transaction.mediaAsset.findFirst({
         where: {
-          logicalImageId: image.image_id,
-          reviewStatus: 'approved',
-          releaseIdRelation: {
-            productId,
-            approved: true,
-          },
+          logicalImageId: image.image_id, reviewStatus: 'approved',
+          releaseIdRelation: { productId, approved: true },
         },
         select: { id: true },
       });
-      if (!asset) {
-        throw new CommitFailure('image_id', 'MEDIA_NOT_READY');
-      }
+      if (!asset) throw new CommitFailure('image_id', 'MEDIA_NOT_READY');
       await transaction.revisionImage.create({
-        data: {
-          revisionId,
-          assetId: asset.id,
-          sortOrder: image.sort_order,
-        },
+        data: { revisionId, assetId: asset.id, sortOrder: image.sort_order },
       });
     }
   }
+
+    private async registerDevelopmentMedia(
+      transaction: Prisma.TransactionClient,
+      productId: string,
+      revisionId: string,
+      rows: ImportProductPayloadDto['images'],
+      actorId: string,
+    ): Promise<void> {
+      if (this.config.get<string>('NODE_ENV') === 'production' ||
+        !this.config.get<boolean>('DEV_CATALOGUE_PUBLISH_ENABLED')) {
+        throw new CommitFailure('images', 'DEV_MEDIA_REGISTRATION_DISABLED', 'errors.forbidden');
+      }
+      const version = rows[0]?.version;
+      if (!version || rows.some((row) => row.version !== version) ||
+        rows.filter((row) => row.role === 'main' && row.sort_order === 1).length !== 1 ||
+        rows.filter((row) => row.role === 'main').length !== 1 ||
+        new Set(rows.map((row) => row.image_id)).size !== rows.length ||
+        new Set(rows.map((row) => row.sort_order)).size !== rows.length) {
+        throw new CommitFailure('images', 'MEDIA_NOT_READY', 'errors.media_not_ready');
+      }
+      if (await transaction.mediaRelease.findUnique({
+        where: { productId_versionLabel: { productId, versionLabel: version } },
+        select: { id: true },
+      })) {
+        throw new CommitFailure('images', 'MEDIA_VERSION_CONFLICT', 'errors.media_not_ready');
+      }
+      const cdn = configurationUrl(this.config, 'MEDIA_CDN_BASE_URL', false);
+      const release = await transaction.mediaRelease.create({
+        data: { productId, versionLabel: version },
+      });
+      await transaction.productRevision.update({
+        where: { id: revisionId }, data: { mediaReleaseId: release.id },
+      });
+      for (const row of rows) {
+        if (!row.image_id || !row.sort_order || !row.derivatives ||
+          row.review_status !== 'approved' ||
+          row.derivatives.some((entry) => {
+            const path = row[`webp_${entry.size}_path` as 'webp_200_path' | 'webp_400_path' | 'webp_800_path' | 'webp_1600_path'];
+            return path !== undefined && path !== null && path !== entry.object_key;
+          })) {
+          throw new CommitFailure('images', 'MEDIA_NOT_READY', 'errors.media_not_ready');
+        }
+        const role = row.role;
+        if (role !== 'main' && role !== 'angle' && role !== 'back_profile' &&
+          role !== 'detail' && role !== 'on_body' && role !== 'original') {
+          throw new CommitFailure('images', 'MEDIA_NOT_READY', 'errors.media_not_ready');
+        }
+        const asset = await transaction.mediaAsset.create({
+          data: {
+            releaseId: release.id, logicalImageId: row.image_id, role,
+            originalPrivatePath: row.original_relative_path,
+            derivatives: row.derivatives.map((entry) => ({ ...entry })),
+            altBg: row.alt_bg, altEn: row.alt_en,
+            processedWithAi: row.processed_with_ai === 'yes',
+            onModelIllustrative: row.on_model_illustrative === 'yes',
+            reviewStatus: 'approved',
+          },
+        });
+        try {
+          for (const locale of ['bg', 'en'] as const) projectMedia(asset, locale, cdn, release.id);
+        } catch (error) {
+          const response = error instanceof ServiceUnavailableException ? error.getResponse() : null;
+          if (response && typeof response === 'object' &&
+            'code' in response && response.code === 'MEDIA_NOT_READY') {
+            throw new CommitFailure('images', 'MEDIA_NOT_READY', 'errors.media_not_ready');
+          }
+          throw error;
+        }
+        await transaction.revisionImage.create({
+          data: { revisionId, assetId: asset.id, sortOrder: row.sort_order },
+        });
+      }
+      await transaction.mediaRelease.update({ where: { id: release.id }, data: { approved: true } });
+      await transaction.auditEvent.create({
+        data: {
+          actorId, action: 'catalogue_import_dev_media_register', subjectType: 'Product',
+          subjectId: productId, eventKey: `catalogue-import-dev-media:${release.id}`,
+          after: { release_id: release.id, media_verification: 'metadata_only_dev', file_bytes_verified: false },
+        },
+      });
+    }
 
   private async persistLegacyReferences(
     transaction: Prisma.TransactionClient,
@@ -1179,11 +1262,12 @@ export class CatalogueImportCommitService {
         message_key: 'errors.not_found',
       });
     }
+    const report = parseReport(batch.report);
     return {
       batch_id: batch.id,
       state: batch.state,
-      report: parseReport(batch.report),
-      products: batch.from_ImportProductRow_batchId.map((row) => ({
+      report,
+      products: orderImportProducts(batch.from_ImportProductRow_batchId, report.diff).map((row) => ({
         ssg_id: row.ssgId,
         state: row.state,
         product_id: row.productId,

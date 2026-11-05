@@ -1,11 +1,12 @@
 import {
+  BadRequestException,
   ConflictException,
   Injectable,
   Logger,
   PayloadTooLargeException,
   ServiceUnavailableException,
 } from '@nestjs/common';
-import { createHash } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import { Prisma } from '../../../generated/prisma/client';
 import type {
   ImportRowState,
@@ -13,10 +14,12 @@ import type {
 } from '../../../generated/prisma/enums';
 import { PrismaService } from '../../database/prisma.service';
 import { isGenuineBarcode } from '../../common/stock-facts/barcode';
+import { readDerivative } from '../products/product-read.service';
 import {
   ImportImageRowDto,
   ImportLegacyLinkRowDto,
   ImportMaterialRowDto,
+  ImportNestedPayloadDto,
   ImportPreflightRequestDto,
   ImportProductPayloadDto,
   ImportProductRowDto,
@@ -151,7 +154,17 @@ export class CatalogueImportService {
     actorId: string,
     request: ImportPreflightRequestDto,
   ): Promise<ImportPreflightOutcome> {
-    const data = normalizePayload(request.data);
+    // Hash input positions, not random IDs, so retries resolve to the original batch.
+    const data = normalizePayload(flattenProducts(
+      request.data,
+      request.data.products.map((_product, index) => `input-${index}`),
+    ));
+    if ([data.units, data.materials, data.images, data.legacy_links]
+      .some((rows) => rows.length > 10000)) {
+      throw new BadRequestException({
+        code: 'VALIDATION_ERROR', message_key: 'errors.validation',
+      });
+    }
     const serialized = canonicalJson(data);
     if (Buffer.byteLength(serialized, 'utf8') > MAX_PAYLOAD_BYTES) {
       throw new PayloadTooLargeException({
@@ -207,10 +220,12 @@ export class CatalogueImportService {
                 return { result: this.toResult(prior), statusCode: 200 };
               }
 
+              const ssgIds = await this.allocateSsgIds(transaction, request.data.products.length);
+              const sourceData = flattenProducts(request.data, ssgIds);
               const evaluation = await this.evaluate(
                 transaction,
-                data,
-                request.data,
+                normalizePayload(sourceData),
+                sourceData,
               );
               const state: ImportState =
                 evaluation.report.errors.length === 0
@@ -292,6 +307,41 @@ export class CatalogueImportService {
       }
       throw error;
     }
+  }
+
+  private async allocateSsgIds(
+    transaction: Prisma.TransactionClient,
+    count: number,
+  ): Promise<string[]> {
+    await transaction.$queryRaw`
+      SELECT pg_advisory_xact_lock(hashtextextended('catalogue-import:ssg-id-allocation', 0))::text
+    `;
+    const ids = new Set<string>();
+    for (let attempt = 0; ids.size < count && attempt < 20; attempt += 1) {
+      const candidates = new Set<string>();
+      const remaining = count - ids.size;
+      for (let index = 0; index < remaining; index += 1) {
+        candidates.add(`SSG-${randomBytes(4).toString('hex').toUpperCase()}`);
+      }
+      const values = [...candidates];
+      const products = await transaction.product.findMany({
+        where: { ssgId: { in: values } }, select: { ssgId: true },
+      });
+      const staged = await transaction.importProductRow.findMany({
+        where: { ssgId: { in: values } }, select: { ssgId: true },
+      });
+      const occupied = new Set([...products, ...staged].map((row) => row.ssgId));
+      for (const id of values) {
+        if (!occupied.has(id)) ids.add(id);
+      }
+    }
+    if (ids.size !== count) {
+      this.logger.warn('Catalogue import could not allocate unique SSG identifiers');
+      throw new ServiceUnavailableException({
+        code: 'TEMPORARY_UNAVAILABLE', message_key: 'errors.temporary_unavailable',
+      });
+    }
+    return [...ids];
   }
 
   private async evaluate(
@@ -664,9 +714,7 @@ export class CatalogueImportService {
     for (const link of data.legacy_links) {
       groupsById.get(value(link.ssg_id))?.legacyLinks.push(link);
     }
-    const groups = [...groupsById.values()].sort((a, b) =>
-      a.ssgId.localeCompare(b.ssgId),
-    );
+    const groups = [...groupsById.values()];
     const invalidGroups = new Set(
       errors
         .map((error) => error.ssg_id)
@@ -1161,6 +1209,21 @@ export class CatalogueImportService {
     images.forEach((image, index) => {
       const row = index + 1;
       const ssgId = value(image.ssg_id);
+      if (image.derivatives !== undefined) {
+        if (!nonBlank(image.alt_bg) || !nonBlank(image.alt_en) ||
+          image.review_status !== 'approved' ||
+          new Set(image.derivatives.map((entry) => entry.size)).size !== 4) {
+          addError('Images', row, 'derivatives', 'MEDIA_NOT_READY', ssgId);
+        }
+        for (const entry of image.derivatives) {
+          try {
+            readDerivative({ ...entry });
+          } catch (error) {
+            if (!(error instanceof ServiceUnavailableException)) throw error;
+            addError('Images', row, 'derivatives', 'MEDIA_NOT_READY', ssgId);
+          }
+        }
+      }
       if (!products.has(ssgId)) {
         addError('Images', row, 'ssg_id', 'PRODUCT_NOT_IN_IMPORT', ssgId);
       }
@@ -1388,17 +1451,49 @@ export class CatalogueImportService {
       productId: string | null;
     }[];
   }): ImportResult {
+    const report = parseReport(batch.report);
     return {
       batch_id: batch.id,
       state: batch.state,
-      report: parseReport(batch.report),
-      products: batch.from_ImportProductRow_batchId.map((row) => ({
+      report,
+      products: orderImportProducts(batch.from_ImportProductRow_batchId, report.diff).map((row) => ({
         ssg_id: row.ssgId,
         state: row.state,
         product_id: row.productId,
       })),
     };
   }
+}
+
+export function orderImportProducts<T extends { ssgId: string }>(
+  products: T[],
+  diff: { ssg_id: string }[],
+): T[] {
+  const positions = new Map(diff.map((row, index) => [row.ssg_id, index]));
+  return [...products].sort((a, b) =>
+    (positions.get(a.ssgId) ?? Number.MAX_SAFE_INTEGER) -
+    (positions.get(b.ssgId) ?? Number.MAX_SAFE_INTEGER),
+  );
+}
+
+function flattenProducts(
+  payload: ImportNestedPayloadDto,
+  ids: string[],
+): ImportProductPayloadDto {
+  const result: ImportProductPayloadDto = {
+    products: [], units: [], materials: [], images: [], legacy_links: [],
+  };
+  payload.products.forEach((product, index) => {
+    const { units, materials, images, legacy_links, ...fields } = product;
+    const ssg_id = ids[index];
+    if (!ssg_id) throw new Error('Missing backend-generated import identifier');
+    result.products.push({ ...fields, ssg_id });
+    result.units.push(...units.map((row) => ({ ...row, ssg_id })));
+    result.materials.push(...materials.map((row) => ({ ...row, ssg_id })));
+    result.images.push(...images.map((row) => ({ ...row, ssg_id })));
+    result.legacy_links.push(...legacy_links.map((row) => ({ ...row, ssg_id })));
+  });
+  return result;
 }
 
 function normalizePayload(
@@ -1670,7 +1765,7 @@ function buildDiff(
 }
 
 function isSsgId(value: string): boolean {
-  return /^SSG-\d{6,}$/.test(value);
+  return /^SSG-(?:[A-F0-9]{8}|\d{6,})$/.test(value);
 }
 
 function value(value: string | null | undefined): string {
