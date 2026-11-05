@@ -7,5 +7,6 @@ import { GuestSessionService } from './guest-session.service';
   imports: [PrismaModule],
   controllers: [GuestSessionController],
   providers: [GuestSessionService],
+  exports: [GuestSessionService],
 })
 export class GuestSessionModule {}

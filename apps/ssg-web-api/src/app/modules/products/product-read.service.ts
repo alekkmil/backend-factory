@@ -197,7 +197,7 @@ function isJsonRecord(value: Prisma.JsonValue): value is Prisma.JsonObject {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
 }
 
-function configurationUrl(
+export function configurationUrl(
   config: ConfigService,
   key: string,
   production: boolean,
@@ -238,7 +238,7 @@ function configurationUrl(
   return url;
 }
 
-function readDerivative(value: Prisma.JsonValue): Derivative {
+export function readDerivative(value: Prisma.JsonValue): Derivative {
   if (
     !isJsonRecord(value) ||
     typeof value.size !== 'number' ||
@@ -291,7 +291,7 @@ function readDerivative(value: Prisma.JsonValue): Derivative {
   };
 }
 
-function projectMedia(
+export function projectMedia(
   asset: MediaAssetRow,
   locale: Locale,
   cdnOrigin: URL,
@@ -406,7 +406,7 @@ function commercialUnits(stocks: StockRow[]): CommercialUnitInput[] {
   }));
 }
 
-function routeUrl(path: string, origin: URL): string {
+export function routeUrl(path: string, origin: URL): string {
   const hasControlCharacters = [...path].some((character) => {
     const code = character.charCodeAt(0);
     return code <= 0x1f || code === 0x7f;
@@ -489,21 +489,14 @@ export class ProductReadService {
     try {
       return await this.prisma.$transaction(
         async (transaction) => {
-          const items = [];
-          for (const id of uniqueIds) {
-            const data = await this.loadProductData(transaction, id);
-            if (!data) {
-              items.push({ id, state: 'unavailable' as const, product: null });
-              continue;
-            }
-            const summary = await this.projectSummary(
-              transaction,
-              data,
-              locale,
-              null,
-            );
-            items.push({ id, state: 'available' as const, product: summary });
-          }
+          const candidates = await this.catalogCandidates(transaction, uniqueIds, locale, null);
+          const byId = new Map(candidates.map((candidate) => [candidate.summary.id, candidate.summary]));
+          const items = uniqueIds.map((id) => {
+            const product = byId.get(id.toLowerCase());
+            return product
+              ? { id, state: 'available' as const, product }
+              : { id, state: 'unavailable' as const, product: null };
+          });
           return { items };
         },
         { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead },
@@ -655,6 +648,20 @@ export class ProductReadService {
       });
     }
     return candidates;
+  }
+
+  async assertPublicationMedia(
+    transaction: Prisma.TransactionClient,
+    id: string,
+  ): Promise<void> {
+    const data = await this.loadProductData(transaction, id);
+    if (!data) throw new NotFoundException();
+    for (const locale of ['bg', 'en'] as const) {
+      await this.projectSummary(transaction, data, locale, null);
+      for (const image of data.revision.from_RevisionImage_revisionId) {
+        projectMedia(image.assetIdRelation, locale, data.cdnOrigin, data.revision.mediaReleaseId);
+      }
+    }
   }
 
   private async loadProductData(

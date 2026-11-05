@@ -5,6 +5,7 @@ import {
   Injectable,
   Logger,
   ServiceUnavailableException,
+  UnauthorizedException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import {
@@ -116,7 +117,7 @@ export class GuestSessionService {
     cookieHeader: string | undefined,
     csrfToken: string | undefined,
     origin: string | undefined,
-  ): Promise<void> {
+  ): Promise<string> {
     const approvedOrigins = this.config
       .getOrThrow<string>('CORS_ORIGINS')
       .split(',')
@@ -140,7 +141,7 @@ export class GuestSessionService {
         select: { id: true },
       });
       if (!session) {
-        throw new ForbiddenException();
+        throw new UnauthorizedException();
       }
       const expected = Buffer.from(
         this.createCsrfToken(token, session.id, origin),
@@ -152,8 +153,9 @@ export class GuestSessionService {
       ) {
         throw new ForbiddenException();
       }
+      return session.id;
     } catch (error) {
-      if (error instanceof ForbiddenException) {
+      if (error instanceof ForbiddenException || error instanceof UnauthorizedException) {
         throw error;
       }
       if (
@@ -171,7 +173,7 @@ export class GuestSessionService {
     }
   }
 
-  private enforceRateLimit(clientIp: string): void {
+  enforceRateLimit(clientIp: string): void {
     const now = Date.now();
     const current = this.requestsByIp.get(clientIp);
     if (!current || now - current.startedAt >= RATE_LIMIT_WINDOW_MS) {

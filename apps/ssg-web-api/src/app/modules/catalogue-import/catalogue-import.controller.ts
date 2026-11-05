@@ -12,11 +12,10 @@ import {
   UseGuards,
 } from "@nestjs/common";
 import type { Response } from "express";
-import type { StaffAuthenticatedRequest } from "../../common/guards/staff-permission.guard";
+import type { StaffAuthenticatedRequest } from "../../common/guards/staff-token.guard";
 import {
-  RequireStaffPermission,
-  StaffPermissionGuard,
-} from "../../common/guards/staff-permission.guard";
+  StaffTokenGuard,
+} from "../../common/guards/staff-token.guard";
 import {
   ImportCommitRequestDto,
   ImportPreflightRequestDto,
@@ -26,8 +25,7 @@ import type { ImportResult } from "./catalogue-import.service";
 import { CatalogueImportCommitService } from "./catalogue-import-commit.service";
 
 @Controller("admin/catalogue/imports")
-@UseGuards(StaffPermissionGuard)
-@RequireStaffPermission("catalogue_edit")
+@UseGuards(StaffTokenGuard)
 export class CatalogueImportController {
   constructor(
     private readonly imports: CatalogueImportService,

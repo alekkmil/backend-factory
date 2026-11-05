@@ -16,6 +16,10 @@ export function validateEnvironment(
   }
 
   const databaseUrl = environment.DATABASE_URL;
+  const trustProxy = environment.TRUST_PROXY ?? 'false';
+  if (trustProxy !== 'false' && trustProxy !== 'loopback') {
+    throw new Error('TRUST_PROXY must be false or loopback');
+  }
   if (typeof databaseUrl !== 'string' || databaseUrl.length === 0) {
     throw new Error('DATABASE_URL is required');
   }
@@ -58,6 +62,13 @@ export function validateEnvironment(
   }
 
   const devStaffAuthEnabled = environment.DEV_STAFF_AUTH_ENABLED ?? 'false';
+  const devCataloguePublish = environment.DEV_CATALOGUE_PUBLISH_ENABLED ?? 'false';
+  if (devCataloguePublish !== 'true' && devCataloguePublish !== 'false') {
+    throw new Error('DEV_CATALOGUE_PUBLISH_ENABLED must be true or false');
+  }
+  if (devCataloguePublish === 'true' && nodeEnv === 'production') {
+    throw new Error('Metadata-only catalogue publication is development-only');
+  }
   if (
     devStaffAuthEnabled !== 'true' &&
     devStaffAuthEnabled !== 'false'
@@ -121,9 +132,11 @@ export function validateEnvironment(
     ...environment,
     NODE_ENV: nodeEnv,
     PORT: port,
+    TRUST_PROXY: trustProxy,
     DATABASE_URL: databaseUrl,
     CORS_ORIGINS: corsOrigins.join(','),
     DEV_STAFF_AUTH_ENABLED: devStaffAuthEnabled === 'true',
+    DEV_CATALOGUE_PUBLISH_ENABLED: devCataloguePublish === 'true',
     OUTBOX_WORKER_ENABLED: outboxWorkerEnabled === 'true',
     OUTBOX_CAPTURE_DIRECTORY: captureDirectory,
     ...workerNumbers,

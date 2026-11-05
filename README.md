@@ -136,6 +136,119 @@ It must also own a Prisma config and migration directory, since the deployment
 workflow runs migrations for each deployment.
 Keep every application's database, secrets and process isolated.
 
+### Frontend catalogue, search and enquiries
+
+| Requirement | API |
+| --- | --- |
+| BG/EN published products, descriptions, material/gemstone specifications and approved CDN images | `GET /api/catalog`, `GET /api/products/:id`, `GET /api/products/resolve` |
+| Current prices, availability and eligible selectable physical units | Product `commercial_result` and detail `stock_choices` |
+| Categories, filter options/counts, sorting, pagination and totals | `GET /api/catalog`, `GET /api/dictionaries` |
+| Product search with independent product/content paging and counts | `GET /api/search` |
+| Refresh local favourites or HOME selections | `POST /api/products/batch` (maximum 50 UUIDs; no favourites storage) |
+| Contact, callback and similar-jewellery enquiries | `POST /api/enquiries`, `POST /api/enquiries/attempt-status` |
+
+Public product reads exclude drafts, hidden products and missing requested
+translations. Prices and stock choices use the existing commercial evaluator:
+staged import units are not live available stock. `PUBLIC_SITE_ORIGIN` and
+`MEDIA_CDN_BASE_URL` must be configured; missing required routes/media or failed
+dependencies fail explicitly rather than manufacturing available products.
+Batch lookup deduplicates IDs in first-occurrence order; unknown/hidden or
+untranslated IDs return `unavailable`, with no N+1 per-product database reads.
+
+Search example:
+
+```http
+GET /api/search?locale=en&q=gold&product_page=1&content_page=1&page_size=24
+```
+
+`locale` and `q` are required. The trimmed NFC query is at most 200 characters;
+empty/whitespace queries return two empty groups without scanning the database.
+Page numbers default to 1; page size defaults to 24 and is limited to 100.
+Products match localized published names/descriptions using literal,
+case-insensitive substring matching, then the existing product projection.
+The response contains `query`, `locale`, `products` and `content`; each group
+has `items`, `total`, `page` and `page_size`. Stable ID ordering and a
+repeatable-read snapshot keep pages and counts consistent within each request.
+Search sends `X-Robots-Tag: noindex`.
+
+The content group searches published titles/intros and plain-text section
+fields, plus localized store names/addresses and current published policies.
+HOME/contact wrappers are intentionally excluded; private evidence, link target
+IDs and untranslated/unpublished content are not searched. Optional content
+preview thumbnails are currently `null`. Content matching is performed
+server-side over published localized records; a large editorial catalogue
+would need an indexed search projection.
+
+For enquiries, first `POST /api/guest-session` with `{}` and an allowed
+`Origin`. Keep its Secure HttpOnly cookie and send its `csrf_token` as
+`X-CSRF-Token` with the same `Origin`. Browser requests must use
+`credentials: 'include'`; credentialed CORS accepts only configured origins.
+Use HTTPS, with frontend and API on the same site for the existing
+`SameSite=Lax` cookie. HTTP localhost can be used where the client accepts
+Secure localhost cookies; other plain HTTP environments cannot.
+
+```json
+{
+  "request_id": "33333333-3333-4333-8333-333333333333",
+  "request_type": "general",
+  "name": "Example Customer",
+  "email": "customer@example.com",
+  "topic": "Product enquiry",
+  "message": "Please contact me about your jewellery.",
+  "language": "en",
+  "origin_route_id": "R050"
+}
+```
+
+`request_type` is `general`, `callback` or `similar_jewellery_creation`.
+An international `phone` is required for the latter two; optional fields must
+be omitted, not `null`. Similar-jewellery enquiries require
+`context: {"type":"product","id":"<published jewellery UUID>"}`.
+Optional contexts also accept published `content` UUIDs and the `store` IDs
+`sofia`/`nessebar`. Contexts and origin route IDs are checked server-side against
+the registry and published data; a route pattern does not activate a page.
+Names/topics/messages are plain text, trimmed and NFC-normalized, with limits
+of 200/250/10000 characters. Emails are limited to 320 and phones to 40.
+Client-supplied recipients, unknown properties and invalid nested fields are
+rejected.
+
+New submissions return HTTP 201 and `{"state":"received","reference":"<UUID>"}`.
+The inquiry, one durable notification intent and one audit event commit
+atomically. Reusing the same `request_id` in the same live guest session with
+the same normalized payload returns the original receipt (HTTP 200), even if
+publication/configuration later changes. A different payload returns HTTP 409.
+Do not generate a fresh ID after a timeout: send
+`{"request_id":"<original UUID>"}` to `POST /api/enquiries/attempt-status`.
+It returns the receipt or `{"state":"unknown_result"}`; it never exposes
+another guest's submission or sends mail. No enquiry body/contact details are
+returned publicly or logged.
+
+Spam protection combines Origin/CSRF checks, strict bounded validation,
+durable serialized limits (5 new enquiries/minute and 20/hour per guest;
+20/minute and 100/hour per IP) and a bounded in-process 20 requests/minute IP
+limiter shared with guest bootstrap/status. Exceeded limits return HTTP 429;
+replays do not consume durable submission quotas. Durable IP markers use a
+SHA-256 scope, not raw addresses. Old markers for an active IP are pruned on
+successful submissions; inactive scopes remain in `ActionRequest` until an
+approved retention cleanup is implemented.
+`TRUST_PROXY=false` is the safe default. For the documented same-host reverse
+proxy, set `TRUST_PROXY=loopback`, prevent direct public access to the API port,
+and ensure the proxy supplies the real client address. Never blindly trust
+client-supplied forwarding headers. With trust disabled behind a proxy,
+clients intentionally share the proxy's IP quota.
+
+Set the server-side `ShopSettings.coordinatorEmail` to a valid configured
+recipient before accepting enquiries (otherwise HTTP 503 with no saved
+submission). **Real email delivery is not implemented/enabled.** As selected
+for this development scope, the existing outbox uses private local capture:
+enable `OUTBOX_WORKER_ENABLED=true` only in development and set an absolute,
+owner-only `OUTBOX_CAPTURE_DIRECTORY` outside any public/release directory.
+With the worker disabled, notifications stay queued durably. Capture failures
+remain retryable and do not invalidate a committed receipt. `received` means
+stored successfully, not delivered to an external mailbox. A reviewed real
+mail provider adapter is still required before production email activation.
+These additions use existing tables and require no new migration.
+
 ### Admin catalogue draft reads
 
 `GET /api/admin/catalogue` lists catalogue products with optional `q` (SSG ID,
@@ -152,7 +265,7 @@ staged-unit count and actionable draft validation errors. Unknown UUIDs return
 units, approve media or publish products. Read-time media checks inspect stored
 metadata; they do not replace byte verification at publication.
 
-Both endpoints require a live enabled staff Principal with `catalogue_read`
+Both endpoints require the configured development staff tokens and a live enabled staff Principal
 and return `Cache-Control: private, no-store`. Public product endpoints continue
 to exclude drafts. No public origin/CDN configuration is needed to read drafts.
 The Postman collection includes an **Admin catalogue** folder: run **List draft
@@ -160,12 +273,196 @@ products**, copy an item UUID into `productId`, then run **Read admin product
 and draft**.
 
 For local development, the opt-in staff adapter uses the existing configured
-Origin and `X-Dev-Staff-Token`/`X-CSRF-Token` headers. Newly created development
-Principals receive `catalogue_read` and `catalogue_edit`; existing permissions
-are never automatically re-granted by requests. Provision `catalogue_read` for
-an existing development Principal through an authorized database administration
-operation if necessary. Production staff authentication remains separate and
-is not provided by this development adapter.
+Origin and `X-Dev-Staff-Token`/`X-CSRF-Token` headers. The same token pair authorizes
+all catalogue administration and import endpoints, including publication; no
+per-operation database permission grants are required. The fixed development
+Principal is created automatically for audit attribution with no permissions
+granted. Existing permission arrays are left untouched and ignored by these
+endpoints. Disabled or non-staff Principals are still rejected on every request.
+`DEV_STAFF_AUTH_ENABLED=true` is required; token authentication is rejected in
+production. Production staff authentication is not provided by this adapter.
+
+### Explicit development publication
+
+`POST /api/admin/catalogue/:id/publish` explicitly publishes the exact current
+draft. Import/commit never publishes automatically. This implementation is
+**development-only and metadata-only**: it does not fetch/decode image files,
+verify their hashes against storage or upload files. Enable it explicitly with
+`DEV_CATALOGUE_PUBLISH_ENABLED=true`;
+production rejects that setting at startup and the endpoint independently
+rejects production use. Real storage verification is still required before
+production publication can be enabled.
+
+The endpoint uses the same two development staff tokens as catalogue reads and
+imports, with allowed Origin and CSRF checks. No database permission grant or
+SQL setup is needed.
+
+First call `GET /api/admin/catalogue/:id`. Use its current `version` and
+`draft_revision_id`, not guessed values:
+
+```http
+POST /api/admin/catalogue/<product UUID>/publish
+Content-Type: application/json
+Origin: <configured frontend origin>
+X-Dev-Staff-Token: <development staff token>
+X-CSRF-Token: <development staff CSRF token>
+```
+
+```json
+{
+  "request_id": "55555555-5555-4555-8555-555555555555",
+  "expected_version": 2,
+  "revision_id": "22222222-2222-4222-8222-222222222222"
+}
+```
+
+Success returns HTTP 200 with the complete `AdminProduct`, incremented
+`version`, `publication_status: "published"`, consumed `draft: null` /
+`draft_revision_id: null` and the selected `published_revision_id`.
+The original same-key/same-payload result replays even after the version has
+changed; changed payload under the same key returns 409. Foreign, missing,
+superseded or stale draft selections return 409. Unknown body/query fields
+are rejected.
+
+Both translations, applicable dictionary/composition/fulfilment fields and
+change reasons must pass validation. An approved product-owned `MediaRelease`
+and its selected approved images must already be attached to the draft, with
+one main image first, four valid WebP derivative metadata entries and BG/EN
+alt text. Metadata paths are checked using the same public projection as
+product reads; **the metadata-only development flag is not evidence that the
+files exist or are approved by a human**. Missing media returns 409
+`MEDIA_NOT_READY`. Existing image-less imports remain drafts; standalone
+registration/attachment endpoints for those existing drafts are not implemented.
+New imports can register and attach explicit development metadata during commit
+as described below. The backend never invents file sizes or hashes.
+
+No verified stock is needed for an enquiry-only, hidden-price catalogue
+product. Purchase eligibility still uses live verified units and shop settings,
+never staged import rows. Selected-locality delivery remains unavailable.
+Exiting a currently published archive requires `confirm_archive_exit: true`
+plus the reviewed draft change reason and nonblank note.
+
+Publication atomically freezes the draft, supersedes the prior revision,
+switches the current pointer, creates BG/EN canonical routes, appends an audit
+record and queues a durable `cache_invalidate` intent. Changed title slugs
+redirect old paths directly to the owner's current path; unchanged slugs do
+not change routes. Historical paths cannot be reused, including when reverting
+to a former title slug, under the current route immutability rules; this fails
+with 409 rather than bypassing those rules. Unknown legacy first-publication
+dates remain unknown; unchanged localized content retains its modification
+date. Any failure rolls the entire publication back.
+
+Public catalogue/detail/batch/search responses send `Cache-Control: no-store`,
+so the FE sees committed state without relying on an external cache worker.
+No cache-invalidation consumer is introduced: those outbox jobs remain pending
+with the worker off or fail explicitly with the existing
+`JOB_HANDLER_UNAVAILABLE` behavior if enabled without a handler.
+Configure `PUBLIC_SITE_ORIGIN` and `MEDIA_CDN_BASE_URL` before publishing.
+No schema migration is required.
+
+### New-product catalogue import
+
+#### Development media registration during commit
+
+With `DEV_CATALOGUE_PUBLISH_ENABLED=true` outside production, each imported
+image may include `derivatives`: exactly four entries for sizes 200/400/800/1600,
+each containing `size`, matching square `width`/`height`, safe CDN-relative
+`object_key`, `mime: "image/webp"`, `colour_space: "sRGB"`, positive integer
+`bytes`, and lowercase 64-hex `sha256`. Supply these values explicitly; they
+are metadata assertions, not storage-verified facts. BG/EN alt text and
+`review_status: "approved"` are required. If the older `webp_*_path` fields are
+also present, they must match the corresponding derivative keys.
+
+All selected images must supply derivatives, share one version, have unique
+image IDs/sort orders and exactly one main image at order 1. Commit creates a
+product-owned release, assets and draft attachments atomically, marks them
+development-approved, and records a `metadata_only_dev` audit event without
+claiming human review or byte verification. Existing release versions cannot
+be overwritten. Failure rolls back that product, including its media.
+Commit still creates only a draft; publication is a separate explicit request.
+Flag-off/production commits reject registration with
+`DEV_MEDIA_REGISTRATION_DISABLED`. Images without derivatives keep the older
+registered-media lookup behavior; empty images remain supported.
+
+Use [the full local media upload example](apps/ssg-web-api/postman/local-media-import.example.json)
+with `POST /api/admin/catalogue/imports`, then commit the returned batch/SSG ID,
+read the created admin product for its version/draft UUID and publish it.
+The example's file sizes/hashes are **synthetic fixture values** and its paths
+do not upload or create files. They test API publication only. For visible
+images, place real matching WebP files under your configured CDN base and use
+their actual metadata. Use a new request UUID for a new import.
+
+`POST /api/admin/catalogue/imports` now accepts nested products without
+client-supplied `ssg_id` values:
+
+```json
+{
+  "request_id": "33333333-3333-4333-8333-333333333333",
+  "data": {
+    "products": [
+      {
+        "product_type": "jewellery",
+        "jewellery_type": "brooch",
+        "name_bg": "Example brooch BG",
+        "name_en": "Example brooch",
+        "description_bg": "Synthetic draft description BG.",
+        "description_en": "Synthetic draft description.",
+        "materials_state": "unknown",
+        "gemstones_state": "unknown",
+        "gemstone_codes": [],
+        "requested_sales_mode": "enquiry_only",
+        "requested_price_visibility": "hidden",
+        "fulfilment_methods": [],
+        "delivery_locality_ids": [],
+        "pickup_location_codes": [],
+        "change_reason_code": "data_check",
+        "units": [],
+        "materials": [],
+        "images": [],
+        "legacy_links": []
+      }
+    ]
+  }
+}
+```
+
+Keep all four related arrays inside each product, even when empty. Their row
+fields are unchanged except that `ssg_id` is removed. The previous five-sheet
+request shape and explicit SSG IDs are rejected by request validation.
+This corrected POST contract creates new-product drafts, not updates selected
+by an existing SSG ID. Existing products/identifiers are not renamed, and
+previously staged five-sheet batches can still be committed.
+
+Preflight allocates cryptographically random uppercase hexadecimal identifiers
+such as `SSG-A7F29C4E` (eight characters after the prefix), checking existing
+products and staged imports and retrying collisions. IDs are durably staged,
+not catalogue products yet. `products` in the response follows input order so
+each generated ID can be matched to its source product. Repeating the same
+actor/request ID and normalized payload returns the same batch and IDs;
+changing the payload under that request ID returns 409. A new request ID
+allocates new IDs and is not a retry.
+
+Commit using the returned batch and IDs:
+
+```json
+{
+  "request_id": "44444444-4444-4444-8444-444444444444",
+  "ssg_ids": ["SSG-A7F29C4E"],
+  "expected_product_versions": [
+    { "ssg_id": "SSG-A7F29C4E", "version": null }
+  ]
+}
+```
+
+Send this to `POST /api/admin/catalogue/imports/<returned batch_id>/commit`;
+the example ID is illustrative, not reusable. Commit continues accepting
+legacy numeric SSG IDs for already staged batches. Preflight remains limited
+to 1000 products, 10000 rows per related collection across the batch and
+10 MB; commit accepts up to 50 products. Validation reports retain sheet/row
+coordinates after flattening related arrays in product input order.
+Use `images: []` for an initial draft; image metadata still does not upload
+files or register approved media, and missing media blocks publication.
+No database migration is needed.
 
 ### Development outbox worker
 

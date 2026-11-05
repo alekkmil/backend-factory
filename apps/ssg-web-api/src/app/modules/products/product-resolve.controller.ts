@@ -1,4 +1,4 @@
-import { Controller, Get, Query, Res } from '@nestjs/common';
+import { Controller, Get, Header, Query, Res } from '@nestjs/common';
 import type { Response } from 'express';
 import { PublicRouteService } from '../../common/publication/public-route.service';
 import { ProductResolveQueryDto } from './product-resolve.dto';
@@ -8,6 +8,7 @@ export class ProductResolveController {
   constructor(private readonly routes: PublicRouteService) {}
 
   @Get('resolve')
+  @Header('Cache-Control', 'no-store')
   async resolve(
     @Query() query: ProductResolveQueryDto,
     @Res({ passthrough: true }) response: Response,
