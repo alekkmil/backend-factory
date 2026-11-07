@@ -681,14 +681,19 @@ It cannot change barcode, product, status, location, reservation or sale history
 Its response is `{stock_item_id, version, price, facts}`. Existing quote/order
 snapshots and actual sale amounts remain unchanged.
 
-The `/internal/stock` routes are **not registered in production** and are not
-ordinary staff/browser endpoints. To intentionally enable the isolated
-development adapter, configure `DEV_STOCK_FACT_AUTH_ENABLED=true`, a distinct
-32+ byte `DEV_STOCK_FACT_AUTH_TOKEN` and `DEV_STOCK_FACT_CSRF_TOKEN`,
-`DEV_STOCK_FACT_PRINCIPAL_ID` and `STOCK_FACT_SOURCE_CODE`. The principal must
-already be an enabled `service` principal with live `stock_fact_write`
-permission; the adapter never creates or grants one. Staff tokens cannot be
-reused. Send `X-Dev-Stock-Token`, `X-CSRF-Token` and an allowed `Origin`.
+The `/internal/stock` routes are **not registered in production**. In development,
+they use the same `StaffTokenGuard` as import, commit, promotion and publication:
+enable `DEV_STAFF_AUTH_ENABLED` and send `X-Dev-Staff-Token`, `X-CSRF-Token`
+and an allowed `Origin`. The authenticated, enabled staff principal is recorded
+as the actor; no service principal or `stock_fact_write` grant is needed for
+these development HTTP routes. The former `DEV_STOCK_FACT_AUTH_*`,
+`DEV_STOCK_FACT_CSRF_TOKEN`, `DEV_STOCK_FACT_PRINCIPAL_ID` and
+`X-Dev-Stock-Token` are no longer used.
+`STOCK_FACT_SOURCE_CODE` is optional for development staff and defaults to
+`dev-staff-stock`; keep any existing configured source identifier unchanged
+to preserve source-event deduplication across the authentication change.
+Non-HTTP service callers still require an enabled service principal with
+`stock_fact_write` and a configured source identifier.
 Keep these internal routes restricted by deployment networking.
 
 Absence body: `{request_id, expected_version, source_event_id, evidence_ref,

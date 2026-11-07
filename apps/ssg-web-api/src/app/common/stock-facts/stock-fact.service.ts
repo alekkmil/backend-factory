@@ -146,6 +146,7 @@ function conflict(code: string, messageKey: string): ConflictException {
 export class StockFactService {
   private readonly logger = new Logger(StockFactService.name);
   private readonly sourceCode: string;
+  private readonly devStaffAccess: boolean;
 
   constructor(
     private readonly prisma: PrismaService,
@@ -155,7 +156,12 @@ export class StockFactService {
     private readonly publication: StockPublicationService,
     @Optional() @Inject(STOCK_FACT_HOOK) private readonly hook?: StockFactHook,
   ) {
-    this.sourceCode = config.get<string>('STOCK_FACT_SOURCE_CODE') ?? '';
+    this.devStaffAccess =
+      config.get<string>('NODE_ENV') !== 'production' &&
+      config.get<boolean>('DEV_STAFF_AUTH_ENABLED') === true;
+    this.sourceCode =
+      config.get<string>('STOCK_FACT_SOURCE_CODE') ||
+      (this.devStaffAccess ? 'dev-staff-stock' : '');
   }
 
   recordPhysicalAbsence(input: PhysicalAbsenceInput): Promise<StockFactResult> {
@@ -225,8 +231,11 @@ export class StockFactService {
         if (
           !actor ||
           !actor.enabled ||
-          actor.kind !== 'service' ||
-          !actor.permissions.includes('stock_fact_write')
+          !(
+            (actor.kind === 'service' &&
+              actor.permissions.includes('stock_fact_write')) ||
+            (actor.kind === 'staff' && this.devStaffAccess)
+          )
         ) {
           throw new ForbiddenException();
         }

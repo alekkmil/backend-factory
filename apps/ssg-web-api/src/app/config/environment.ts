@@ -90,49 +90,13 @@ export function validateEnvironment(
   }
 
   const outboxWorkerEnabled = environment.OUTBOX_WORKER_ENABLED ?? 'false';
-  const stockAdapterEnabled =
-    environment.DEV_STOCK_FACT_AUTH_ENABLED ?? 'false';
-  if (stockAdapterEnabled !== 'true' && stockAdapterEnabled !== 'false')
-    throw new Error('DEV_STOCK_FACT_AUTH_ENABLED must be true or false');
-  if (stockAdapterEnabled === 'true') {
-    if (nodeEnv === 'production')
-      throw new Error('Development stock adapters are disabled in production');
-    for (const name of [
-      'DEV_STOCK_FACT_AUTH_TOKEN',
-      'DEV_STOCK_FACT_CSRF_TOKEN',
-    ]) {
-      const token = environment[name];
-      if (typeof token !== 'string' || Buffer.byteLength(token) < 32)
-        throw new Error(`${name} must contain at least 32 characters`);
-      if (
-        token === environment.DEV_STAFF_AUTH_TOKEN ||
-        token === environment.DEV_STAFF_CSRF_TOKEN
-      )
-        throw new Error(
-          'Stock adapter credentials must be separate from staff credentials',
-        );
-    }
-    if (
-      environment.DEV_STOCK_FACT_AUTH_TOKEN ===
-      environment.DEV_STOCK_FACT_CSRF_TOKEN
-    )
-      throw new Error(
-        'Stock adapter authentication and CSRF tokens must be distinct',
-      );
-    if (
-      typeof environment.DEV_STOCK_FACT_PRINCIPAL_ID !== 'string' ||
-      !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
-        environment.DEV_STOCK_FACT_PRINCIPAL_ID,
-      )
-    )
-      throw new Error('DEV_STOCK_FACT_PRINCIPAL_ID must be a UUID');
-    if (
-      typeof environment.STOCK_FACT_SOURCE_CODE !== 'string' ||
-      !/^[A-Za-z0-9._:-]{1,80}$/.test(environment.STOCK_FACT_SOURCE_CODE)
-    )
-      throw new Error(
-        'STOCK_FACT_SOURCE_CODE is required for the stock adapter',
-      );
+  const stockFactSourceCode = environment.STOCK_FACT_SOURCE_CODE ?? '';
+  if (
+    typeof stockFactSourceCode !== 'string' ||
+    (stockFactSourceCode !== '' &&
+      !/^[A-Za-z0-9._:-]{1,80}$/.test(stockFactSourceCode))
+  ) {
+    throw new Error('STOCK_FACT_SOURCE_CODE must be a valid source identifier');
   }
   if (outboxWorkerEnabled !== 'true' && outboxWorkerEnabled !== 'false') {
     throw new Error('OUTBOX_WORKER_ENABLED must be true or false');
@@ -190,7 +154,7 @@ export function validateEnvironment(
     DEV_STAFF_AUTH_ENABLED: devStaffAuthEnabled === 'true',
     DEV_CATALOGUE_PUBLISH_ENABLED: devCataloguePublish === 'true',
     OUTBOX_WORKER_ENABLED: outboxWorkerEnabled === 'true',
-    DEV_STOCK_FACT_AUTH_ENABLED: stockAdapterEnabled === 'true',
+    STOCK_FACT_SOURCE_CODE: stockFactSourceCode,
     OUTBOX_CAPTURE_DIRECTORY: captureDirectory,
     ...workerNumbers,
   };
