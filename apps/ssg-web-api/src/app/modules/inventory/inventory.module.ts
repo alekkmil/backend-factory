@@ -2,7 +2,6 @@ import { Module } from '@nestjs/common';
 import type { DynamicModule } from '@nestjs/common';
 import { PrismaModule } from '../../database/prisma.module';
 import { StaffTokenGuard } from '../../common/guards/staff-token.guard';
-import { StockAdapterGuard } from '../../common/guards/stock-adapter.guard';
 import { StockFactModule } from '../../common/stock-facts/stock-fact.module';
 import { TransactionModule } from '../../common/transactions/transaction.module';
 import {
@@ -23,7 +22,7 @@ export class InventoryModule {
           ? []
           : [StockAdapterController]),
       ],
-      providers: [InventoryService, StaffTokenGuard, StockAdapterGuard],
+      providers: [InventoryService, StaffTokenGuard],
     };
   }
 }

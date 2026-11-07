@@ -85,8 +85,6 @@
     { "key": "unitDetailsRequestId", "value": "77777777-7777-4777-8777-777777777777", "type": "string" },
     { "key": "stockAbsenceRequestId", "value": "88888888-8888-4888-8888-888888888888", "type": "string" },
     { "key": "stockSaleRequestId", "value": "99999999-9999-4999-8999-999999999999", "type": "string" },
-    { "key": "devStockAuthToken", "value": "", "type": "string" },
-    { "key": "devStockCsrfToken", "value": "", "type": "string" },
     { "key": "contentId", "value": "", "type": "string" },
     { "key": "storeCode", "value": "sofia", "type": "string" },
     { "key": "draftJson", "value": "{}", "type": "string" },
@@ -708,14 +706,14 @@
           "response": []
         },
         {
-          "name": "Record physical absence (trusted dev adapter)",
+          "name": "Record physical absence (development staff)",
           "request": {
             "method": "POST",
             "header": [
               { "key": "Origin", "value": "{{frontendOrigin}}" },
               { "key": "Content-Type", "value": "application/json" },
-              { "key": "X-Dev-Stock-Token", "value": "{{devStockAuthToken}}" },
-              { "key": "X-CSRF-Token", "value": "{{devStockCsrfToken}}" }
+              { "key": "X-Dev-Staff-Token", "value": "{{devStaffAuthToken}}" },
+              { "key": "X-CSRF-Token", "value": "{{devStaffCsrfToken}}" }
             ],
             "body": {
               "mode": "raw",
@@ -723,19 +721,19 @@
               "options": { "raw": { "language": "json" } }
             },
             "url": "{{baseUrl}}/internal/stock/{{stockItemId}}/physical-absence",
-            "description": "Separate DEV_STOCK_FACT_AUTH_ENABLED gate, live service principal stock_fact_write and distinct adapter credentials required. Unregistered in production. Blocks unsold stock; no sale is inferred."
+            "description": "Uses the same development staff token, CSRF token and allowed Origin as import, commit and publish. Unregistered in production. Blocks unsold stock; no sale is inferred."
           },
           "response": []
         },
         {
-          "name": "Record actual store sale (trusted dev adapter)",
+          "name": "Record actual store sale (development staff)",
           "request": {
             "method": "POST",
             "header": [
               { "key": "Origin", "value": "{{frontendOrigin}}" },
               { "key": "Content-Type", "value": "application/json" },
-              { "key": "X-Dev-Stock-Token", "value": "{{devStockAuthToken}}" },
-              { "key": "X-CSRF-Token", "value": "{{devStockCsrfToken}}" }
+              { "key": "X-Dev-Staff-Token", "value": "{{devStaffAuthToken}}" },
+              { "key": "X-CSRF-Token", "value": "{{devStaffCsrfToken}}" }
             ],
             "body": {
               "mode": "raw",
@@ -743,7 +741,7 @@
               "options": { "raw": { "language": "json" } }
             },
             "url": "{{baseUrl}}/internal/stock/{{stockItemId}}/store-sale",
-            "description": "Actual documented sale only; example price/currency are synthetic. Separate trusted adapter auth required. Source event replay survives observed version changes; contradictory sale facts conflict. All actual units sold autoarchives without publishing drafts."
+            "description": "Actual documented sale only; example price/currency are synthetic. Uses the same development staff token, CSRF token and allowed Origin as import, commit and publish. Unregistered in production. Source event replay survives observed version changes; contradictory sale facts conflict. All actual units sold autoarchives without publishing drafts."
           },
           "response": []
         }

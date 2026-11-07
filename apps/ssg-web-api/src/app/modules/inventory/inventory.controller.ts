@@ -15,8 +15,6 @@ import {
 import type { Response } from 'express';
 import { StaffTokenGuard } from '../../common/guards/staff-token.guard';
 import type { StaffAuthenticatedRequest } from '../../common/guards/staff-token.guard';
-import { StockAdapterGuard } from '../../common/guards/stock-adapter.guard';
-import type { StockAdapterRequest } from '../../common/guards/stock-adapter.guard';
 import { StockFactService } from '../../common/stock-facts/stock-fact.service';
 import {
   EmptyInventoryQueryDto,
@@ -63,7 +61,7 @@ export class InventoryController {
 }
 
 @Controller('internal/stock')
-@UseGuards(StockAdapterGuard)
+@UseGuards(StaffTokenGuard)
 export class StockAdapterController {
   constructor(private readonly facts: StockFactService) {}
 
@@ -73,12 +71,12 @@ export class StockAdapterController {
     @Param('id', ParseUUIDPipe) id: string,
     @Body() body: PhysicalAbsenceDto,
     @Query() _query: EmptyInventoryQueryDto,
-    @Req() request: StockAdapterRequest,
+    @Req() request: StaffAuthenticatedRequest,
   ) {
-    if (!request.stockActorId) throw new UnauthorizedException();
+    if (!request.staffAuth) throw new UnauthorizedException();
     return this.facts.recordPhysicalAbsence({
       stockItemId: id,
-      actorId: request.stockActorId,
+      actorId: request.staffAuth.principalId,
       requestId: body.request_id,
       expectedVersion: body.expected_version,
       sourceEventId: body.source_event_id,
@@ -94,12 +92,12 @@ export class StockAdapterController {
     @Param('id', ParseUUIDPipe) id: string,
     @Body() body: StoreSaleDto,
     @Query() _query: EmptyInventoryQueryDto,
-    @Req() request: StockAdapterRequest,
+    @Req() request: StaffAuthenticatedRequest,
   ) {
-    if (!request.stockActorId) throw new UnauthorizedException();
+    if (!request.staffAuth) throw new UnauthorizedException();
     return this.facts.recordStoreSale({
       stockItemId: id,
-      actorId: request.stockActorId,
+      actorId: request.staffAuth.principalId,
       requestId: body.request_id,
       expectedVersion: body.expected_version,
       sourceEventId: body.source_event_id,
