@@ -1,5 +1,8 @@
-import { Transform } from 'class-transformer';
-import { Equals, IsIn, IsInt, IsString, IsUUID, Max, MaxLength, Min, ValidateIf } from 'class-validator';
+import { Transform, Type } from 'class-transformer';
+import {
+  ArrayMaxSize, Equals, IsArray, IsDefined, IsIn, IsInt, IsString,
+  IsUUID, Matches, Max, MaxLength, Min, ValidateIf, ValidateNested,
+} from 'class-validator';
 import { PublicationStatus } from '../../../generated/prisma/enums';
 import type {
   CompositionState, DeliveryScope, FulfilmentMethod, LocationCode, PriceVisibility,
@@ -51,6 +54,167 @@ export class CataloguePublishDto {
   @ValidateIf((_object, value: unknown) => value !== undefined)
   @Equals(true)
   confirm_archive_exit?: true;
+}
+
+export class CatalogueDraftMaterialDto {
+  @IsString()
+  @MaxLength(80)
+  material_code!: string;
+
+  @ValidateIf((_object, value: unknown) => value !== null)
+  @IsDefined()
+  @IsString()
+  @MaxLength(80)
+  fineness_code!: string | null;
+
+  @ValidateIf((_object, value: unknown) => value !== null)
+  @IsDefined()
+  @IsString()
+  @MaxLength(80)
+  gold_karat_code!: string | null;
+}
+
+export class ProductDraftInputDto {
+  @IsIn(['jewellery', 'loose_stone'])
+  product_type!: ProductDraft['product_type'];
+
+  @ValidateIf((_object, value: unknown) => value !== null)
+  @IsDefined()
+  @IsString()
+  @MaxLength(80)
+  jewellery_type!: string | null;
+
+  @ValidateIf((_object, value: unknown) => value !== null)
+  @IsDefined()
+  @IsString()
+  @MaxLength(250)
+  name_bg!: string | null;
+
+  @ValidateIf((_object, value: unknown) => value !== null)
+  @IsDefined()
+  @IsString()
+  @MaxLength(250)
+  name_en!: string | null;
+
+  @ValidateIf((_object, value: unknown) => value !== null)
+  @IsDefined()
+  @IsString()
+  @MaxLength(20000)
+  description_bg!: string | null;
+
+  @ValidateIf((_object, value: unknown) => value !== null)
+  @IsDefined()
+  @IsString()
+  @MaxLength(20000)
+  description_en!: string | null;
+
+  @IsIn(['unknown', 'none', 'known'])
+  materials_state!: ProductDraft['materials_state'];
+
+  @IsArray()
+  @ArrayMaxSize(100)
+  @ValidateNested({ each: true })
+  @Type(() => CatalogueDraftMaterialDto)
+  materials!: CatalogueDraftMaterialDto[];
+
+  @IsIn(['unknown', 'none', 'known'])
+  gemstones_state!: ProductDraft['gemstones_state'];
+
+  @IsArray()
+  @ArrayMaxSize(100)
+  @IsString({ each: true })
+  @MaxLength(80, { each: true })
+  gemstone_codes!: string[];
+
+  @IsIn(['direct_purchase', 'enquiry_only', 'archive_catalogue'])
+  sales_mode!: ProductDraft['sales_mode'];
+
+  @IsIn(['visible', 'hidden'])
+  price_visibility!: ProductDraft['price_visibility'];
+
+  @IsArray()
+  @ArrayMaxSize(2)
+  @IsIn(['delivery', 'store_pickup'], { each: true })
+  fulfilment_methods!: ProductDraft['fulfilment_methods'];
+
+  @ValidateIf((_object, value: unknown) => value !== null)
+  @IsDefined()
+  @IsIn(['bulgaria', 'selected_localities'])
+  delivery_scope!: ProductDraft['delivery_scope'];
+
+  @IsArray()
+  @ArrayMaxSize(100)
+  @IsString({ each: true })
+  @MaxLength(80, { each: true })
+  delivery_locality_ids!: string[];
+
+  @IsArray()
+  @ArrayMaxSize(2)
+  @IsIn(['sofia', 'nessebar'], { each: true })
+  pickup_location_codes!: ProductDraft['pickup_location_codes'];
+
+  @ValidateIf((_object, value: unknown) => value !== null)
+  @IsDefined()
+  @IsUUID()
+  media_release_id!: string | null;
+
+  @IsArray()
+  @ArrayMaxSize(50)
+  @IsUUID(undefined, { each: true })
+  image_ids!: string[];
+
+  @ValidateIf((_object, value: unknown) => value !== null)
+  @IsDefined()
+  @IsIn(['damage', 'data_check', 'management_decision', 'other'])
+  change_reason_code!: ProductDraft['change_reason_code'];
+
+  @ValidateIf((_object, value: unknown) => value !== null)
+  @IsDefined()
+  @IsString()
+  @MaxLength(2000)
+  change_reason_note!: string | null;
+}
+
+export class CatalogueSaveDraftDto {
+  @IsString()
+  @Matches(/^[A-Za-z0-9._:-]{1,128}$/)
+  request_id!: string;
+
+  @IsInt()
+  @Min(1)
+  @Max(2147483646)
+  expected_version!: number;
+
+  @ValidateIf((_object, value: unknown) => value !== undefined)
+  @Equals(true)
+  confirm_archive_exit?: true;
+
+  @IsDefined()
+  @ValidateNested()
+  @Type(() => ProductDraftInputDto)
+  draft!: ProductDraftInputDto;
+}
+
+export class CatalogueVisibilityDto {
+  @IsString()
+  @Matches(/^[A-Za-z0-9._:-]{1,128}$/)
+  request_id!: string;
+
+  @IsInt()
+  @Min(1)
+  @Max(2147483646)
+  expected_version!: number;
+
+  @IsIn(['hidden', 'published'])
+  publication_status!: 'hidden' | 'published';
+
+  @IsIn(['damage', 'data_check', 'management_decision', 'other'])
+  reason!: RestrictionReason;
+
+  @IsString()
+  @Matches(/\S/)
+  @MaxLength(2000)
+  note!: string;
 }
 
 export interface CatalogueFieldError {

@@ -6,7 +6,9 @@ export function validateEnvironment(
   environment: Record<string, unknown>,
 ): Record<string, unknown> {
   const nodeEnv = environment.NODE_ENV ?? 'development';
-  if (!['local', 'development', 'production', 'test'].includes(String(nodeEnv))) {
+  if (
+    !['local', 'development', 'production', 'test'].includes(String(nodeEnv))
+  ) {
     throw new Error('NODE_ENV must be local, development, production, or test');
   }
 
@@ -34,9 +36,7 @@ export function validateEnvironment(
     throw new Error('DATABASE_URL must use the PostgreSQL protocol');
   }
 
-  const corsOrigins = String(
-    environment.CORS_ORIGINS ?? defaultCorsOrigins,
-  )
+  const corsOrigins = String(environment.CORS_ORIGINS ?? defaultCorsOrigins)
     .split(',')
     .map((origin) => origin.trim())
     .filter(Boolean);
@@ -62,17 +62,15 @@ export function validateEnvironment(
   }
 
   const devStaffAuthEnabled = environment.DEV_STAFF_AUTH_ENABLED ?? 'false';
-  const devCataloguePublish = environment.DEV_CATALOGUE_PUBLISH_ENABLED ?? 'false';
+  const devCataloguePublish =
+    environment.DEV_CATALOGUE_PUBLISH_ENABLED ?? 'false';
   if (devCataloguePublish !== 'true' && devCataloguePublish !== 'false') {
     throw new Error('DEV_CATALOGUE_PUBLISH_ENABLED must be true or false');
   }
   if (devCataloguePublish === 'true' && nodeEnv === 'production') {
     throw new Error('Metadata-only catalogue publication is development-only');
   }
-  if (
-    devStaffAuthEnabled !== 'true' &&
-    devStaffAuthEnabled !== 'false'
-  ) {
+  if (devStaffAuthEnabled !== 'true' && devStaffAuthEnabled !== 'false') {
     throw new Error('DEV_STAFF_AUTH_ENABLED must be true or false');
   }
   if (devStaffAuthEnabled === 'true') {
@@ -92,6 +90,50 @@ export function validateEnvironment(
   }
 
   const outboxWorkerEnabled = environment.OUTBOX_WORKER_ENABLED ?? 'false';
+  const stockAdapterEnabled =
+    environment.DEV_STOCK_FACT_AUTH_ENABLED ?? 'false';
+  if (stockAdapterEnabled !== 'true' && stockAdapterEnabled !== 'false')
+    throw new Error('DEV_STOCK_FACT_AUTH_ENABLED must be true or false');
+  if (stockAdapterEnabled === 'true') {
+    if (nodeEnv === 'production')
+      throw new Error('Development stock adapters are disabled in production');
+    for (const name of [
+      'DEV_STOCK_FACT_AUTH_TOKEN',
+      'DEV_STOCK_FACT_CSRF_TOKEN',
+    ]) {
+      const token = environment[name];
+      if (typeof token !== 'string' || Buffer.byteLength(token) < 32)
+        throw new Error(`${name} must contain at least 32 characters`);
+      if (
+        token === environment.DEV_STAFF_AUTH_TOKEN ||
+        token === environment.DEV_STAFF_CSRF_TOKEN
+      )
+        throw new Error(
+          'Stock adapter credentials must be separate from staff credentials',
+        );
+    }
+    if (
+      environment.DEV_STOCK_FACT_AUTH_TOKEN ===
+      environment.DEV_STOCK_FACT_CSRF_TOKEN
+    )
+      throw new Error(
+        'Stock adapter authentication and CSRF tokens must be distinct',
+      );
+    if (
+      typeof environment.DEV_STOCK_FACT_PRINCIPAL_ID !== 'string' ||
+      !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+        environment.DEV_STOCK_FACT_PRINCIPAL_ID,
+      )
+    )
+      throw new Error('DEV_STOCK_FACT_PRINCIPAL_ID must be a UUID');
+    if (
+      typeof environment.STOCK_FACT_SOURCE_CODE !== 'string' ||
+      !/^[A-Za-z0-9._:-]{1,80}$/.test(environment.STOCK_FACT_SOURCE_CODE)
+    )
+      throw new Error(
+        'STOCK_FACT_SOURCE_CODE is required for the stock adapter',
+      );
+  }
   if (outboxWorkerEnabled !== 'true' && outboxWorkerEnabled !== 'false') {
     throw new Error('OUTBOX_WORKER_ENABLED must be true or false');
   }
@@ -100,14 +142,20 @@ export function validateEnvironment(
     typeof captureDirectory !== 'string' ||
     (captureDirectory !== '' && !isAbsolute(captureDirectory))
   ) {
-    throw new Error('OUTBOX_CAPTURE_DIRECTORY must be an absolute private directory');
+    throw new Error(
+      'OUTBOX_CAPTURE_DIRECTORY must be an absolute private directory',
+    );
   }
   if (outboxWorkerEnabled === 'true') {
     if (nodeEnv === 'production') {
-      throw new Error('Outbox worker requires a reviewed production adapter; local capture is development-only');
+      throw new Error(
+        'Outbox worker requires a reviewed production adapter; local capture is development-only',
+      );
     }
     if (!captureDirectory) {
-      throw new Error('OUTBOX_CAPTURE_DIRECTORY is required when the worker is enabled');
+      throw new Error(
+        'OUTBOX_CAPTURE_DIRECTORY is required when the worker is enabled',
+      );
     }
   }
   const workerNumbers: Record<string, number> = {};
@@ -120,12 +168,16 @@ export function validateEnvironment(
   ] as const) {
     const value = Number(environment[name] ?? defaultValue);
     if (!Number.isInteger(value) || value < minimum || value > maximum) {
-      throw new Error(`${name} must be an integer between ${minimum} and ${maximum}`);
+      throw new Error(
+        `${name} must be an integer between ${minimum} and ${maximum}`,
+      );
     }
     workerNumbers[name] = value;
   }
   if (workerNumbers.OUTBOX_RETRY_MAX_MS < workerNumbers.OUTBOX_RETRY_BASE_MS) {
-    throw new Error('OUTBOX_RETRY_MAX_MS must be at least OUTBOX_RETRY_BASE_MS');
+    throw new Error(
+      'OUTBOX_RETRY_MAX_MS must be at least OUTBOX_RETRY_BASE_MS',
+    );
   }
 
   return {
@@ -138,6 +190,7 @@ export function validateEnvironment(
     DEV_STAFF_AUTH_ENABLED: devStaffAuthEnabled === 'true',
     DEV_CATALOGUE_PUBLISH_ENABLED: devCataloguePublish === 'true',
     OUTBOX_WORKER_ENABLED: outboxWorkerEnabled === 'true',
+    DEV_STOCK_FACT_AUTH_ENABLED: stockAdapterEnabled === 'true',
     OUTBOX_CAPTURE_DIRECTORY: captureDirectory,
     ...workerNumbers,
   };

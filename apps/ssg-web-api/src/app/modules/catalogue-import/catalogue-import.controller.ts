@@ -1,11 +1,13 @@
 import {
   Body,
   Controller,
+  Get,
   HttpCode,
   HttpStatus,
   Param,
   ParseUUIDPipe,
   Post,
+  Query,
   Req,
   Res,
   UnauthorizedException,
@@ -23,6 +25,8 @@ import {
 import { CatalogueImportService } from "./catalogue-import.service";
 import type { ImportResult } from "./catalogue-import.service";
 import { CatalogueImportCommitService } from "./catalogue-import-commit.service";
+import { CatalogueEmptyQueryPipe } from "../catalogue-admin/catalogue-empty-query.pipe";
+import { CatalogueDetailQueryDto } from "../catalogue-admin/catalogue-admin.dto";
 
 @Controller("admin/catalogue/imports")
 @UseGuards(StaffTokenGuard)
@@ -69,5 +73,22 @@ export class CatalogueImportController {
     const outcome = await this.commits.commit(actorId, batchId, request);
     response.status(outcome.statusCode);
     return outcome.result;
+  }
+
+  @Get(":id")
+  async read(
+    @Param("id", ParseUUIDPipe) batchId: string,
+    @Req() httpRequest: StaffAuthenticatedRequest,
+    @Query(CatalogueEmptyQueryPipe) query: CatalogueDetailQueryDto,
+  ): Promise<ImportResult> {
+    void query;
+    const actorId = httpRequest.staffAuth?.principalId;
+    if (!actorId) {
+      throw new UnauthorizedException({
+        code: "ACCESS_UNAVAILABLE",
+        message_key: "errors.access_unavailable",
+      });
+    }
+    return this.imports.read(actorId, batchId);
   }
 }

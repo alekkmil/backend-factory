@@ -19,6 +19,8 @@ import type {
 import { OutboxService } from '../outbox/outbox.service';
 import { TransactionService } from '../transactions/transaction.service';
 import { PrismaService } from '../../database/prisma.service';
+import { StockPublicationService } from './stock-publication.service';
+import { BadRequestException } from '@nestjs/common';
 
 export const STOCK_FACT_HOOK = Symbol('STOCK_FACT_HOOK');
 
@@ -150,14 +152,13 @@ export class StockFactService {
     private readonly config: ConfigService,
     private readonly transactions: TransactionService,
     private readonly outbox: OutboxService,
+    private readonly publication: StockPublicationService,
     @Optional() @Inject(STOCK_FACT_HOOK) private readonly hook?: StockFactHook,
   ) {
     this.sourceCode = config.get<string>('STOCK_FACT_SOURCE_CODE') ?? '';
   }
 
-  recordPhysicalAbsence(
-    input: PhysicalAbsenceInput,
-  ): Promise<StockFactResult> {
+  recordPhysicalAbsence(input: PhysicalAbsenceInput): Promise<StockFactResult> {
     assertRequestId(input.requestId);
     assertEvidence(input.sourceEventId, 128);
     assertEvidence(input.evidenceRef, 2000);
@@ -178,119 +179,147 @@ export class StockFactService {
       throw new TypeError('Store sale facts are invalid');
     }
     const soldAt = new Date(input.soldAt);
-    if (Number.isNaN(soldAt.getTime()) || soldAt.toISOString() !== input.soldAt) {
-      throw new TypeError('Sale timestamp must be an exact UTC ISO timestamp');
+    if (Number.isNaN(soldAt.getTime()) || soldAt.getTime() > Date.now()) {
+      throw new BadRequestException(
+        'Sale timestamp must describe a recorded past fact',
+      );
     }
     if (new Prisma.Decimal(input.amount).lte(0)) {
-      throw new TypeError('Sale amount must be positive');
+      throw new BadRequestException('Sale amount must be positive');
     }
-    return this.record(input, 'store_sale');
+    return this.record(
+      {
+        ...input,
+        amount: new Prisma.Decimal(input.amount).toFixed(2),
+        soldAt: soldAt.toISOString(),
+      },
+      'store_sale',
+    );
   }
 
   private async record(
     input: FactInput,
     kind: 'physical_absence' | 'store_sale',
   ): Promise<StockFactResult> {
-    if (
-      !SOURCE_CODE_PATTERN.test(this.sourceCode) ||
-      this.hook === undefined
-    ) {
+    if (!SOURCE_CODE_PATTERN.test(this.sourceCode) || this.hook === undefined) {
       throw new ServiceUnavailableException({
         code: 'CONFIGURATION_UNAVAILABLE',
         message_key: 'errors.configuration_unavailable',
       });
     }
 
-    return this.transactions.serializable(async (transaction) => {
-      const identity = await transaction.stockItem.findUnique({
-        where: { id: input.stockItemId },
-        select: { productId: true },
-      });
-      if (!identity) {
-        throw new NotFoundException();
-      }
+    try {
+      return await this.transactions.serializable(async (transaction) => {
+        const identity = await transaction.stockItem.findUnique({
+          where: { id: input.stockItemId },
+          select: { productId: true },
+        });
+        if (!identity) {
+          throw new NotFoundException();
+        }
 
-      const actor = await transaction.principal.findUnique({
-        where: { id: input.actorId },
-        select: { enabled: true, kind: true, permissions: true },
-      });
-      if (
-        !actor ||
-        !actor.enabled ||
-        actor.kind !== 'service' ||
-        !actor.permissions.includes('stock_fact_write')
-      ) {
-        throw new ForbiddenException();
-      }
+        const actor = await transaction.principal.findUnique({
+          where: { id: input.actorId },
+          select: { enabled: true, kind: true, permissions: true },
+        });
+        if (
+          !actor ||
+          !actor.enabled ||
+          actor.kind !== 'service' ||
+          !actor.permissions.includes('stock_fact_write')
+        ) {
+          throw new ForbiddenException();
+        }
 
-      const sourceFacts =
-        'evidenceRef' in input
-          ? {
-              fact_kind: kind,
-              stock_item_id: input.stockItemId,
-              evidence_ref: input.evidenceRef,
-              reason: input.reason,
-              note: input.note,
-            }
-          : {
-              fact_kind: kind,
-              stock_item_id: input.stockItemId,
-              store_code: input.storeCode,
-              document_ref: input.documentRef,
-              sold_at: input.soldAt,
-              amount: input.amount,
-              currency: input.currency,
-              seller_provenance: input.sellerProvenance ?? null,
-            };
-      const sourceScope = `stock-fact-source:${this.sourceCode}:${input.stockItemId}`;
-      const actorScope = `stock-fact:${kind}:${input.actorId}:${input.stockItemId}`;
-      const actorReplay = await this.transactions.executeIdempotentAction(
-        transaction,
-        {
-          scopeKey: actorScope,
-          requestId: input.requestId,
-          payload: {
-            ...sourceFacts,
-            source_event_id: input.sourceEventId,
-            expected_version: input.expectedVersion,
+        const sourceFacts =
+          'evidenceRef' in input
+            ? {
+                fact_kind: kind,
+                stock_item_id: input.stockItemId,
+                evidence_ref: input.evidenceRef,
+                reason: input.reason,
+                note: input.note,
+              }
+            : {
+                fact_kind: kind,
+                stock_item_id: input.stockItemId,
+                store_code: input.storeCode,
+                document_ref: input.documentRef,
+                sold_at: input.soldAt,
+                amount: input.amount,
+                currency: input.currency,
+                seller_provenance: input.sellerProvenance ?? null,
+              };
+        const sourceScope = `stock-fact-source:${this.sourceCode}:${input.stockItemId}`;
+        const actorScope = `stock-fact:${kind}:${input.actorId}:${input.stockItemId}`;
+        const actorReplay = await this.transactions.executeIdempotentAction(
+          transaction,
+          {
+            scopeKey: actorScope,
+            requestId: input.requestId,
+            payload: {
+              ...sourceFacts,
+              source_event_id: input.sourceEventId,
+              expected_version: input.expectedVersion,
+            },
           },
-        },
-        async () => {
-          const sourceReplay =
-            await this.transactions.executeIdempotentAction(
-              transaction,
-              {
-                scopeKey: sourceScope,
-                requestId: input.sourceEventId,
-                payload: sourceFacts,
-              },
-              async () => ({
-                status_code: 200,
-                body: resultJson(
-                  await this.applyFact(
-                    transaction,
-                    input,
-                    identity.productId,
-                    kind,
+          async () => {
+            const sourceReplay =
+              await this.transactions.executeIdempotentAction(
+                transaction,
+                {
+                  scopeKey: sourceScope,
+                  requestId: input.sourceEventId,
+                  payload: sourceFacts,
+                },
+                async () => ({
+                  status_code: 200,
+                  body: resultJson(
+                    await this.applyFact(
+                      transaction,
+                      input,
+                      identity.productId,
+                      kind,
+                    ),
                   ),
-                ),
+                }),
+              );
+            const sourceResult = readResult(sourceReplay.body);
+            return {
+              status_code: sourceReplay.status_code,
+              body: resultJson({
+                ...sourceResult,
+                replayed: sourceReplay.replayed,
               }),
-            );
-          const sourceResult = readResult(sourceReplay.body);
-          return {
-            status_code: sourceReplay.status_code,
-            body: resultJson({
-              ...sourceResult,
-              replayed: sourceReplay.replayed,
-            }),
-          };
-        },
-      );
-      return {
-        ...readResult(actorReplay.body),
-        replayed: actorReplay.replayed || readResult(actorReplay.body).replayed,
-      };
-    });
+            };
+          },
+        );
+        return {
+          ...readResult(actorReplay.body),
+          replayed:
+            actorReplay.replayed || readResult(actorReplay.body).replayed,
+        };
+      });
+    } catch (error) {
+      if (
+        error instanceof Prisma.PrismaClientKnownRequestError &&
+        error.code === 'P2002'
+      ) {
+        throw conflict(
+          'RECONCILIATION_REQUIRED',
+          'errors.reconciliation_required',
+        );
+      }
+      if (
+        error instanceof Prisma.PrismaClientKnownRequestError ||
+        error instanceof Prisma.PrismaClientUnknownRequestError ||
+        error instanceof Prisma.PrismaClientInitializationError
+      ) {
+        this.logger.warn('Stock fact database operation failed');
+        throw new ServiceUnavailableException();
+      }
+      throw error;
+    }
   }
 
   private async applyFact(
@@ -300,10 +329,9 @@ export class StockFactService {
     kind: 'physical_absence' | 'store_sale',
   ): Promise<StockFactResult> {
     await this.transactions.lockSettings(transaction);
-    const lockedProducts = await this.transactions.lockProducts(
-      transaction,
-      [expectedProductId],
-    );
+    const lockedProducts = await this.transactions.lockProducts(transaction, [
+      expectedProductId,
+    ]);
     if (lockedProducts.length !== 1) {
       throw new NotFoundException();
     }
@@ -330,7 +358,10 @@ export class StockFactService {
     if (!stock || stock.productId !== expectedProductId) {
       throw new NotFoundException();
     }
-    if (kind === 'physical_absence' && stock.version !== input.expectedVersion) {
+    if (
+      kind === 'physical_absence' &&
+      stock.version !== input.expectedVersion
+    ) {
       throw conflict('VERSION_CONFLICT', 'errors.version_conflict');
     }
 
@@ -352,8 +383,11 @@ export class StockFactService {
     }
 
     const previousReservationReference = stock.reservationReference;
-    const nextStatus: StockStatus =
-      kind === 'store_sale' ? 'sold' : 'blocked';
+    const beforePublic = await this.publication.fingerprint(
+      transaction,
+      stock.productId,
+    );
+    const nextStatus: StockStatus = kind === 'store_sale' ? 'sold' : 'blocked';
     const eventId = randomUUID();
     const sourceEventId = input.sourceEventId;
     const eventKey = `stock-fact:${this.hashSourceEvent(
@@ -465,6 +499,24 @@ export class StockFactService {
       priorReservationReference: previousReservationReference,
       factEventId: audit.id,
     });
+    await transaction.product.update({
+      where: { id: stock.productId },
+      data: { version: { increment: 1 } },
+    });
+    if (kind === 'store_sale') {
+      await this.publication.archiveIfAllSold(
+        transaction,
+        stock.productId,
+        input.actorId,
+        `Autoarchive after all verified units sold; trusted stock event ${audit.id}.`,
+      );
+    }
+    await this.publication.changed(
+      transaction,
+      stock.productId,
+      beforePublic,
+      audit.id,
+    );
 
     if (kind === 'store_sale' && stock.version !== input.expectedVersion) {
       this.logger.warn(

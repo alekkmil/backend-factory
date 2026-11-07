@@ -146,6 +146,9 @@ Keep every application's database, secrets and process isolated.
 | Product search with independent product/content paging and counts | `GET /api/search` |
 | Refresh local favourites or HOME selections | `POST /api/products/batch` (maximum 50 UUIDs; no favourites storage) |
 | Contact, callback and similar-jewellery enquiries | `POST /api/enquiries`, `POST /api/enquiries/attempt-status` |
+| Published editorial pages and HOME assembly | `GET /api/content`, `GET /api/content/:id`, `GET /api/home` |
+| Stores, site contacts and published policies | `GET /api/stores`, `GET /api/stores/:code`, `GET /api/site-contacts`, `GET /api/policies/:kind` |
+| Configured consent and production SEO feed | `GET /api/cookie-config`, `GET /api/seo/urls` |
 
 Public product reads exclude drafts, hidden products and missing requested
 translations. Prices and stock choices use the existing commercial evaluator:
@@ -248,6 +251,96 @@ remain retryable and do not invalidate a committed receipt. `received` means
 stored successfully, not delivered to an external mailbox. A reviewed real
 mail provider adapter is still required before production email activation.
 These additions use existing tables and require no new migration.
+
+### Public website content, configuration and SEO
+
+| Endpoint | Request |
+| --- | --- |
+| `GET /api/content` | `locale`, `type`, optional `parent_id`, `page`, `page_size` |
+| `GET /api/content/:id` | Content UUID; `locale` |
+| `GET /api/home` | `locale` |
+| `GET /api/stores` | `locale` |
+| `GET /api/stores/:code` | `sofia` or `nessebar`; `locale` |
+| `GET /api/site-contacts` | `locale` |
+| `GET /api/policies/:kind` | Policy kind; `locale`, optional `version` |
+| `GET /api/cookie-config` | `locale` |
+| `GET /api/seo/urls` | Optional `after_id`, `limit` |
+
+Locale is `bg` or `en`. Content list responses are `{items,total,page,page_size}`;
+details include resolved public sections/links, public type-specific fields,
+related published products, alternate URLs and truthful publication dates.
+Only published translations and current routes are eligible. Private editorial
+evidence and source JSON identifiers are not exposed as public content.
+Internal targets are resolved against published entities; external links and
+source media must pass the configured-origin/approved-media checks.
+
+HOME uses the configured published HOME record, not a fabricated landing page.
+Its `{locale,sections}` response preserves the source's 11 section keys.
+Stores expose localized verified public data and approved media. Site contacts
+resolve configured store codes and verified links; no coordinator mailbox or
+other internal commerce configuration is returned. Policies return the requested
+published version, or the current published version when omitted.
+Cookie configuration resolves its exact published cookies-policy version.
+Optional analytics/marketing providers and persistence duration must come from
+approved configuration; they are never added automatically.
+
+SEO returns `{items,next_cursor}` containing current published URLs,
+alternates and nullable truthful `lastmod`. Continue with the returned cursor as
+`after_id`; redirects, hidden/unpublished owners and unsupported paths are not
+listed. Development returns 404 with `X-Robots-Tag: noindex, nofollow, noarchive`,
+so a public development sitemap cannot be exposed accidentally.
+All these endpoints validate query parameters and use no-store freshness.
+Missing/invalid required source data fails explicitly; implementation does not
+populate HOME, policy, contact or store content in your database.
+
+### Catalogue draft editing, visibility and reviewed-media registration
+
+| Operation | Endpoint |
+| --- | --- |
+| Replace the editable draft without releasing it | `PATCH /api/admin/catalogue/:id/draft` |
+| Read the current report of an actor-owned import batch | `GET /api/admin/catalogue/imports/:id` |
+| Hide or restore a previously published product | `POST /api/admin/catalogue/:id/visibility` |
+| Register already-processed image metadata | `POST /api/admin/catalogue/:id/media-releases` |
+
+These use the same development staff/Origin/CSRF guard as catalogue reads.
+Draft save requires `{request_id,expected_version,draft,confirm_archive_exit?}`:
+`draft` is a full replacement using the admin detail draft fields, including
+nullable values and empty arrays. It validates dictionaries/composition,
+fulfilment, product-owned approved image selections, and restriction reasons.
+It returns the complete `AdminProduct`, creating a draft from the released
+revision when needed. Saving never changes live routes or publishes.
+Archive exit requires explicit `confirm_archive_exit:true` plus a reviewed reason
+and note; verification of a barcode alone is not archive-exit authority.
+
+Visibility body: `{request_id,expected_version,publication_status,reason,note}`.
+The requested status is `hidden` or `published`, never `draft`.
+Restoration requires an existing released current revision, valid current routes
+and publication-ready media. Visibility writes also require
+`DEV_CATALOGUE_PUBLISH_ENABLED=true`; production use remains disabled.
+Hiding preserves editorial data and URL history while excluding the product
+from public reads. It is not deletion or a draft publication operation.
+
+Media registration body: `{request_id,version,receipt_sha256,images}`.
+Version is `v` plus a positive integer; the receipt is 64 lowercase hex characters.
+Each image requires `logical_image_id`, `role`, `original_relative_path`,
+`alt_bg`, `alt_en`, `processed_with_ai`, `on_model_illustrative`, and exactly
+four square 200/400/800/1600 WebP/sRGB `derivatives` with object key, dimensions,
+byte count and SHA-256. Legacy registration paths are
+`SSG-ID_org/IMAGE_ID.jpg` and `products/SSG-ID/vN/IMAGE_ID-SIZE.webp`;
+the multipart upload endpoint retains its product UUID/release UUID paths.
+Both formats use the existing public media projection.
+Success returns `{release_id,approved,assets:[{id,logical_image_id}]}` (201 first,
+200 replay). Registration does not attach the release: select its release/asset
+IDs in draft save, then publish explicitly.
+
+**Registration approval is development metadata-only**, behind
+`DEV_CATALOGUE_PUBLISH_ENABLED`. Reviewer attribution and the supplied receipt
+hash are stored, but no receipt artifact/signature or storage bytes are verified;
+the audit explicitly records that limitation. It does not establish authentic
+human review or production-ready storage. Prefer multipart upload when the
+backend should actually process and upload image files.
+Matching write retries return original results; changed payloads and stale
+versions conflict. Unknown body/query properties are rejected.
 
 ### Admin catalogue draft reads
 
@@ -528,6 +621,108 @@ coordinates after flattening related arrays in product input order.
 Omit `images` from new imports. Attach files through the separate multipart
 endpoint; missing media still blocks publication.
 No database migration is needed.
+
+### Verified inventory and restricted stock facts
+
+| Operation | Endpoint |
+| --- | --- |
+| Promote a committed import barcode into a verified physical unit | `POST /api/admin/catalogue/staged-units/promote` |
+| Replace verified price/measurement facts only | `PATCH /api/admin/stock/:stock_item_id/details` |
+| Record documented physical absence | `POST /internal/stock/:stock_item_id/physical-absence` |
+| Record a documented actual store sale | `POST /internal/stock/:stock_item_id/store-sale` |
+
+Admin operations use the existing opt-in development staff token/Origin/CSRF
+guard. Promotion requires a committed batch row containing the genuine barcode,
+matching `BarcodeIdentity` ownership and no existing operational `StockItem`.
+It never overwrites existing stock, exits archive mode or publishes a product.
+Original staging payloads remain immutable; admin staged counts are derived from
+whether each claimed barcode now has a verified unit.
+
+Promotion body (synthetic shape; replace all identifiers and facts with verified
+data before use):
+
+```json
+{
+  "request_id": "<stable request UUID>",
+  "batch_id": "<committed import UUID>",
+  "ssg_id": "<returned SSG ID>",
+  "barcode": "<genuine imported barcode>",
+  "location_code": "sofia",
+  "stock_status": "available",
+  "price": null,
+  "currency": null,
+  "weight_g": null,
+  "stone_weight_ct": null,
+  "dimensions_mm": null,
+  "verified_at": "<actual verification ISO timestamp>",
+  "source_ref": "<verification evidence reference>",
+  "transfer_to": null,
+  "reservation_reference": null,
+  "sale": null
+}
+```
+
+All keys above are required, including nullable keys. Price/currency must both
+be null or a positive decimal string and ISO currency code. Measurements must
+be positive decimal strings; dimensions accept only `length`, `width`, `height`,
+`inner_diameter`, `circumference`. Embedded gemstone weight is not accepted as
+`stone_weight_ct` for jewellery. Verification/sale timestamps cannot be future.
+`reserved` requires `reservation_reference`; `in_transit` requires a different
+`transfer_to` store; other statuses forbid those respective fields.
+`sold` requires `sale` with `channel`, nullable `store_location`, `document_ref`,
+`sold_at`, positive `amount`, `currency` and nullable `seller_provenance`.
+Store sales require a store; historical online sales use a null store.
+Promotion returns `stock_item_id`, `product_id`, `barcode`, `status`, `replayed`;
+first creation is 201 and matching replay is 200.
+
+Unit details uses `request_id`, `expected_version`, all nullable price/fact
+fields shown above, `verified_at`, `source_ref`, `reason` and `note`.
+It cannot change barcode, product, status, location, reservation or sale history.
+Its response is `{stock_item_id, version, price, facts}`. Existing quote/order
+snapshots and actual sale amounts remain unchanged.
+
+The `/internal/stock` routes are **not registered in production** and are not
+ordinary staff/browser endpoints. To intentionally enable the isolated
+development adapter, configure `DEV_STOCK_FACT_AUTH_ENABLED=true`, a distinct
+32+ byte `DEV_STOCK_FACT_AUTH_TOKEN` and `DEV_STOCK_FACT_CSRF_TOKEN`,
+`DEV_STOCK_FACT_PRINCIPAL_ID` and `STOCK_FACT_SOURCE_CODE`. The principal must
+already be an enabled `service` principal with live `stock_fact_write`
+permission; the adapter never creates or grants one. Staff tokens cannot be
+reused. Send `X-Dev-Stock-Token`, `X-CSRF-Token` and an allowed `Origin`.
+Keep these internal routes restricted by deployment networking.
+
+Absence body: `{request_id, expected_version, source_event_id, evidence_ref,
+reason, note}`. Sale body: `{request_id, expected_version, source_event_id,
+store_code, document_ref, sold_at, amount, currency, seller_provenance?}`.
+Both return `{stock_item_id, version, status, fact_event_id, replayed}`.
+Actor request keys and trusted source events are independently deduplicated;
+changed facts under the same key conflict. A genuine sale with an old observed
+version is reconciled against current stock rather than discarded; contradictory
+sale evidence returns 409.
+
+Stock facts update affected checks/order attention in the same transaction,
+retain acceptance history and suppress unsafe unleased acceptance notifications.
+In-flight notifications retain the existing final stock recheck and uncertain
+delivery reconciliation behavior. Absence blocks unsold stock; it never records
+a sale. All actual units sold triggers commercial-only autoarchive, preserving
+visibility, routes, original dates, media, text and any separate editorial draft.
+No-current products remain unpublished. Product versions increase on factual
+writes; public lastmod and invalidation change only for changed public output.
+No automatic transfer/release or general stock lifecycle UI is added.
+
+The non-destructive
+`20261107114000_allow_incomplete_drafts_and_hidden_revisions` migration permits
+incomplete jewellery drafts and commercial replacement of a hidden current
+revision. It replaces the immediate single-draft index with an equivalent
+deferred exclusion constraint: a commercial revision can assemble its children
+within the transaction while a separate editorial draft is retained, but only
+one draft may exist at commit. Released jewellery still requires a valid type and complete approved
+media/translations. Deferred pointer/revision checks validate the final row state,
+not intermediate snapshots while a commercial revision is assembled.
+Only `publicModifiedAt` may change on a current public translation; published
+text, identity, original dates and evidence remain immutable.
+Apply the migration on deployment; it was verified only on
+an isolated database, not on your configured local or Lightsail database.
 
 ### Development outbox worker
 

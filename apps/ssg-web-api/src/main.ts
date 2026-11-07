@@ -27,7 +27,14 @@ async function bootstrap(): Promise<void> {
   }
 
   app.setGlobalPrefix('api', {
-    exclude: [{ path: 'internal/health', method: RequestMethod.GET }],
+    exclude: [
+      { path: 'internal/health', method: RequestMethod.GET },
+      {
+        path: 'internal/stock/:id/physical-absence',
+        method: RequestMethod.POST,
+      },
+      { path: 'internal/stock/:id/store-sale', method: RequestMethod.POST },
+    ],
   });
   app.enableCors({
     origin: config.getOrThrow<string>('CORS_ORIGINS').split(','),

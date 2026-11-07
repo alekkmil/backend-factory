@@ -9,10 +9,22 @@ import { OutboxModule } from '../../common/outbox/outbox.module';
 import { ProductReadModule } from '../products/product-read.module';
 import { CatalogueMediaService } from './catalogue-media.service';
 import { CatalogueMediaStorageService } from './catalogue-media-storage.service';
+import { CatalogueDraftService } from './catalogue-draft.service';
+import { CatalogueVisibilityService } from './catalogue-visibility.service';
+import { CatalogueMediaRegistrationService } from './catalogue-media-registration.service';
 
 @Module({
   imports: [PrismaModule, TransactionModule, OutboxModule, ProductReadModule],
   controllers: [CatalogueAdminController],
-  providers: [CatalogueAdminService, CataloguePublishService, CatalogueMediaService, CatalogueMediaStorageService, StaffTokenGuard],
+  providers: [
+    CatalogueAdminService,
+    CataloguePublishService,
+    CatalogueMediaService,
+    CatalogueMediaStorageService,
+    CatalogueDraftService,
+    CatalogueVisibilityService,
+    CatalogueMediaRegistrationService,
+    StaffTokenGuard,
+  ],
 })
 export class CatalogueAdminModule {}
