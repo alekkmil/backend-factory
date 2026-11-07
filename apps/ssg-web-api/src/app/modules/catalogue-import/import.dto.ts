@@ -420,13 +420,6 @@ export class ImportNestedProductDto extends ImportProductFieldsDto {
   @ArrayMaxSize(10000)
   @IsObject({ each: true })
   @ValidateNested({ each: true })
-  @Type(() => ImportImageFieldsDto)
-  images!: ImportImageFieldsDto[];
-
-  @IsArray()
-  @ArrayMaxSize(10000)
-  @IsObject({ each: true })
-  @ValidateNested({ each: true })
   @Type(() => ImportLegacyLinkFieldsDto)
   legacy_links!: ImportLegacyLinkFieldsDto[];
 }

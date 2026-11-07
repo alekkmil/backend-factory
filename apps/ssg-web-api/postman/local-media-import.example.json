@@ -1,5 +1,5 @@
 {
-  "request_id": "71bb9ae4-855b-4ccb-99ef-a4ed162f43c1",
+  "request_id": "4fe2dab5-70b5-4ff9-8e39-458cb7a0618b",
   "data": {
     "products": [
       {
@@ -9,72 +9,77 @@
         "name_en": "Local test brooch with media",
         "description_bg": "Тестов продукт за локална проверка на каталога.",
         "description_en": "Synthetic local catalogue fixture, not verified stock or media.",
-        "materials_state": "unknown",
-        "gemstones_state": "unknown",
-        "gemstone_codes": [],
-        "requested_sales_mode": "archive_catalogue",
+        "materials_state": "known",
+        "gemstones_state": "known",
+        "requested_sales_mode": "enquiry_only",
         "requested_price_visibility": "hidden",
-        "fulfilment_methods": [],
+        "gemstone_codes": ["amethyst", "diamond"],
+        "fulfilment_methods": ["delivery", "store_pickup"],
+        "delivery_scope": "bulgaria",
         "delivery_locality_ids": [],
-        "pickup_location_codes": [],
+        "pickup_location_codes": ["sofia", "nessebar"],
         "change_reason_code": "data_check",
-        "change_reason_note": "Synthetic local test; image sizes and hashes are fixture values, not verified file facts.",
-        "units": [],
-        "materials": [],
-        "legacy_links": [],
-        "images": [
+        "change_reason_note": "Synthetic local fixture: barcodes, composition, measurements, legacy prices and image metadata are examples, not verified stock or file facts.",
+        "units": [
           {
-            "image_id": "01",
-            "version": "local-v1",
-            "role": "main",
-            "sort_order": 1,
-            "alt_bg": "Тестова брошка",
-            "alt_en": "Local test brooch",
-            "review_status": "approved",
-            "processed_with_ai": "no",
-            "on_model_illustrative": "no",
-            "derivatives": [
-              {
-                "size": 200,
-                "width": 200,
-                "height": 200,
-                "object_key": "local-test/brooch/01-200.webp",
-                "mime": "image/webp",
-                "colour_space": "sRGB",
-                "bytes": 100,
-                "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-              },
-              {
-                "size": 400,
-                "width": 400,
-                "height": 400,
-                "object_key": "local-test/brooch/01-400.webp",
-                "mime": "image/webp",
-                "colour_space": "sRGB",
-                "bytes": 100,
-                "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-              },
-              {
-                "size": 800,
-                "width": 800,
-                "height": 800,
-                "object_key": "local-test/brooch/01-800.webp",
-                "mime": "image/webp",
-                "colour_space": "sRGB",
-                "bytes": 100,
-                "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-              },
-              {
-                "size": 1600,
-                "width": 1600,
-                "height": 1600,
-                "object_key": "local-test/brooch/01-1600.webp",
-                "mime": "image/webp",
-                "colour_space": "sRGB",
-                "bytes": 100,
-                "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-              }
-            ]
+            "barcode": "9900000000011",
+            "location_code": "sofia",
+            "stock_status": null,
+            "price": null,
+            "currency": null,
+            "weight_g": "8.450",
+            "stone_weight_ct": null,
+            "length_mm": "35.000",
+            "width_mm": "22.000",
+            "height_mm": "5.000",
+            "inner_diameter_mm": null,
+            "circumference_mm": null,
+            "transfer_to": null,
+            "reservation_reference": null,
+            "sale_json": null,
+            "verified_at": null,
+            "source_ref": "local-fixture:brooch:unit-1:not-verified"
+          },
+          {
+            "barcode": "9900000000028",
+            "location_code": "nessebar",
+            "stock_status": null,
+            "price": null,
+            "currency": null,
+            "weight_g": "8.600",
+            "stone_weight_ct": null,
+            "length_mm": "35.200",
+            "width_mm": "22.100",
+            "height_mm": "5.100",
+            "inner_diameter_mm": null,
+            "circumference_mm": null,
+            "transfer_to": null,
+            "reservation_reference": null,
+            "sale_json": null,
+            "verified_at": null,
+            "source_ref": "local-fixture:brooch:unit-2:not-verified"
+          }
+        ],
+        "materials": [
+          {
+            "material_code": "gold",
+            "fineness_code": null,
+            "gold_karat_code": "14"
+          },
+          {
+            "material_code": "silver",
+            "fineness_code": null,
+            "gold_karat_code": null
+          }
+        ],
+        "legacy_links": [
+          {
+            "legacy_id": "local-fixture-brooch-001",
+            "legacy_url_bg": "https://legacy.example.com/bg/brooch-001",
+            "legacy_url_en": "https://legacy.example.com/en/brooch-001",
+            "historical_price": "125.00",
+            "historical_currency": "EUR",
+            "source_ref": "local-fixture:legacy-catalogue:brooch-001"
           }
         ]
       }

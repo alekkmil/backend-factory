@@ -1484,13 +1484,12 @@ function flattenProducts(
     products: [], units: [], materials: [], images: [], legacy_links: [],
   };
   payload.products.forEach((product, index) => {
-    const { units, materials, images, legacy_links, ...fields } = product;
+    const { units, materials, legacy_links, ...fields } = product;
     const ssg_id = ids[index];
     if (!ssg_id) throw new Error('Missing backend-generated import identifier');
     result.products.push({ ...fields, ssg_id });
     result.units.push(...units.map((row) => ({ ...row, ssg_id })));
     result.materials.push(...materials.map((row) => ({ ...row, ssg_id })));
-    result.images.push(...images.map((row) => ({ ...row, ssg_id })));
     result.legacy_links.push(...legacy_links.map((row) => ({ ...row, ssg_id })));
   });
   return result;

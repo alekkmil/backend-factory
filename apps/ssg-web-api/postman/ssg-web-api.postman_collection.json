@@ -480,6 +480,30 @@
       "name": "Catalogue publication",
       "item": [
         {
+          "name": "Upload and append media to draft (development only)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Origin", "value": "{{frontendOrigin}}", "type": "text" },
+              { "key": "X-Dev-Staff-Token", "value": "{{devStaffAuthToken}}", "type": "text" },
+              { "key": "X-CSRF-Token", "value": "{{devStaffCsrfToken}}", "type": "text" }
+            ],
+            "url": "{{baseUrl}}/api/admin/catalogue/{{productId}}/media",
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "metadata", "type": "text",
+                  "value": "{\"request_id\":\"{{publishRequestId}}\",\"expected_version\":{{productVersion}},\"images\":[{\"client_key\":\"front\",\"role\":\"main\",\"sort_order\":1,\"alt_bg\":\"Предна страна на брошката\",\"alt_en\":\"Front of the brooch\",\"processed_with_ai\":false,\"on_model_illustrative\":false}]}"
+                },
+                { "key": "image_front", "type": "file", "src": [] }
+              ]
+            },
+            "description": "Select a real JPEG/PNG/WebP file (longest side >=1600px; <=10MiB). Let Postman generate multipart Content-Type. Uses S3 eu-central-1; requires DEV_CATALOGUE_PUBLISH_ENABLED and configured bucket credentials plus MEDIA_CDN_BASE_URL. Generates measured square WebP derivatives and appends to draft; does not publish. Copy returned version/draft UUID before publishing. When appending to an existing main image, use a different client_key, non-main role and sort_order greater than existing maximum. Supports <=5 new files, <=50 total selected images. Match each binary field image_<client_key> to metadata. Same request/bytes replay; changed payload409. S3 policies must keep private/products originals private."
+          },
+          "response": []
+        },
+        {
           "name": "Publish exact current draft (development only)",
           "request": {
             "method": "POST",
@@ -503,7 +527,7 @@
     },
     {
       "name": "Catalogue import",
-      "description": "Development upload-to-publish example: use the sibling local-media-import.example.json as the preflight request body. With DEV_CATALOGUE_PUBLISH_ENABLED=true outside production, explicit images[].derivatives metadata is registered and attached atomically during commit. Each image needs four square WebP entries (200/400/800/1600), bytes/hash, BG/EN alt and review_status approved; all share one version. This is metadata-only development approval, not file verification or upload. Synthetic example sizes/hashes do not represent actual files. Commit leaves a draft; read admin detail and publish explicitly. Without derivatives, existing registered-media lookup behavior is unchanged.",
+      "description": "Use local-media-import.example.json for product preflight and commit. New imports omit images; attach files using Catalogue publication / Upload and append media to draft, then publish explicitly. Previously staged image batches remain committable.",
       "item": [
         {
           "name": "Stage catalogue import (preflight)",
@@ -533,7 +557,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"request_id\": \"{{requestId}}\",\n  \"data\": {\n    \"products\": [\n      {\n        \"product_type\": \"jewellery\",\n        \"jewellery_type\": \"brooch\",\n        \"name_bg\": \"Example brooch BG\",\n        \"name_en\": \"Example brooch\",\n        \"description_bg\": \"Synthetic draft description BG.\",\n        \"description_en\": \"Synthetic draft description.\",\n        \"materials_state\": \"unknown\",\n        \"gemstones_state\": \"unknown\",\n        \"gemstone_codes\": [],\n        \"requested_sales_mode\": \"enquiry_only\",\n        \"requested_price_visibility\": \"hidden\",\n        \"fulfilment_methods\": [],\n        \"delivery_locality_ids\": [],\n        \"pickup_location_codes\": [],\n        \"change_reason_code\": \"data_check\",\n        \"change_reason_note\": \"Synthetic draft only.\",\n        \"units\": [],\n        \"materials\": [],\n        \"images\": [],\n        \"legacy_links\": []\n      }\n    ]\n  }\n}",
+              "raw": "{\n  \"request_id\": \"{{requestId}}\",\n  \"data\": {\n    \"products\": [\n      {\n        \"product_type\": \"jewellery\",\n        \"jewellery_type\": \"brooch\",\n        \"name_bg\": \"Example brooch BG\",\n        \"name_en\": \"Example brooch\",\n        \"description_bg\": \"Synthetic draft description BG.\",\n        \"description_en\": \"Synthetic draft description.\",\n        \"materials_state\": \"unknown\",\n        \"gemstones_state\": \"unknown\",\n        \"gemstone_codes\": [],\n        \"requested_sales_mode\": \"enquiry_only\",\n        \"requested_price_visibility\": \"hidden\",\n        \"fulfilment_methods\": [],\n        \"delivery_locality_ids\": [],\n        \"pickup_location_codes\": [],\n        \"change_reason_code\": \"data_check\",\n        \"change_reason_note\": \"Synthetic draft only.\",\n        \"units\": [],\n        \"materials\": [],\n        \"legacy_links\": []\n      }\n    ]\n  }\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -541,7 +565,7 @@
               }
             },
             "url": "{{baseUrl}}/api/admin/catalogue/imports",
-            "description": "Requires the configured development staff token pair and allowed Origin; no database permission grant. New imports use data.products with units/materials/images/legacy_links nested in each product; all four arrays are required, even when empty. Do not send ssg_id anywhere or sibling sheet arrays. Backend-generated SSG-XXXXXXXX IDs are returned in products in input order; retain them and batch_id for commit with version:null. Same actor/request_id/payload returns the same IDs; changed payload returns 409. This is a new-product import, not an update-by-SSG-ID. Existing staged batches remain committable with their original IDs. Preflight never creates catalogue products, publishes, registers media or activates stock."
+            "description": "Requires the configured development staff token pair and allowed Origin; no database permission grant. New imports use data.products with units/materials/legacy_links nested in each product; all three arrays are required even when empty. Omit images and attach files separately after commit. Do not send ssg_id anywhere or sibling sheet arrays. Backend-generated SSG-XXXXXXXX IDs are returned in products in input order; retain them and batch_id for commit with version:null. Same actor/request_id/payload returns the same IDs; changed payload409. Existing staged batches remain committable. Preflight never creates products, publishes or activates stock."
           },
           "response": []
         }
