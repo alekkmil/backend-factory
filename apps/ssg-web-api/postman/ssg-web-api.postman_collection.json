@@ -75,7 +75,27 @@
       "key": "draftRevisionId",
       "value": "22222222-2222-4222-8222-222222222222",
       "type": "string"
-    }
+    },
+    { "key": "batchId", "value": "", "type": "string" },
+    { "key": "ssgId", "value": "", "type": "string" },
+    { "key": "barcode", "value": "", "type": "string" },
+    { "key": "stockItemId", "value": "", "type": "string" },
+    { "key": "stockVersion", "value": "1", "type": "string" },
+    { "key": "promotionRequestId", "value": "66666666-6666-4666-8666-666666666666", "type": "string" },
+    { "key": "unitDetailsRequestId", "value": "77777777-7777-4777-8777-777777777777", "type": "string" },
+    { "key": "stockAbsenceRequestId", "value": "88888888-8888-4888-8888-888888888888", "type": "string" },
+    { "key": "stockSaleRequestId", "value": "99999999-9999-4999-8999-999999999999", "type": "string" },
+    { "key": "devStockAuthToken", "value": "", "type": "string" },
+    { "key": "devStockCsrfToken", "value": "", "type": "string" },
+    { "key": "contentId", "value": "", "type": "string" },
+    { "key": "storeCode", "value": "sofia", "type": "string" },
+    { "key": "draftJson", "value": "{}", "type": "string" },
+    { "key": "reviewedImagesJson", "value": "[]", "type": "string" },
+    { "key": "mediaVersion", "value": "v1", "type": "string" },
+    { "key": "mediaReceiptSha256", "value": "", "type": "string" },
+    { "key": "draftSaveRequestId", "value": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "type": "string" },
+    { "key": "visibilityRequestId", "value": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", "type": "string" },
+    { "key": "mediaRegisterRequestId", "value": "cccccccc-cccc-4ccc-8ccc-cccccccccccc", "type": "string" }
   ],
   "item": [
     {
@@ -520,6 +540,210 @@
             },
             "url": "{{baseUrl}}/api/admin/catalogue/{{productId}}/publish",
             "description": "Set productVersion and draftRevisionId from the current admin detail response. Requires explicit DEV_CATALOGUE_PUBLISH_ENABLED=true, valid public site/CDN configuration, the configured development staff token pair and allowed Origin, and approved media already registered and attached. No database permission grant. Does not upload/register/approve/attach media or inspect actual files. Development metadata-only publication is rejected in production. Image-less drafts fail MEDIA_NOT_READY. Reuse publishRequestId and the exact payload on retries; changed payload returns 409. Archive exits additionally require confirm_archive_exit:true and a reviewed draft reason/note. Success200 returns AdminProduct with draft consumed and published_revision_id set."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Public website content",
+      "description": "Requires published localized records, current routes and verified configured store/contact/policy/cookie data. Missing source data is not automatically seeded. Set contentId from the content list.",
+      "item": [
+        {
+          "name": "List published content",
+          "request": { "method": "GET", "header": [], "url": "{{baseUrl}}/api/content?locale={{locale}}&type=article&page=1&page_size=24" },
+          "response": []
+        },
+        {
+          "name": "Read published content detail",
+          "request": { "method": "GET", "header": [], "url": "{{baseUrl}}/api/content/{{contentId}}?locale={{locale}}" },
+          "response": []
+        },
+        {
+          "name": "Read assembled HOME",
+          "request": { "method": "GET", "header": [], "url": "{{baseUrl}}/api/home?locale={{locale}}", "description": "Uses the published HOME source and its eleven section keys; resolves only public links, records, products and stores." },
+          "response": []
+        },
+        {
+          "name": "List stores",
+          "request": { "method": "GET", "header": [], "url": "{{baseUrl}}/api/stores?locale={{locale}}" },
+          "response": []
+        },
+        {
+          "name": "Read store",
+          "request": { "method": "GET", "header": [], "url": "{{baseUrl}}/api/stores/{{storeCode}}?locale={{locale}}" },
+          "response": []
+        },
+        {
+          "name": "Read site contacts",
+          "request": { "method": "GET", "header": [], "url": "{{baseUrl}}/api/site-contacts?locale={{locale}}" },
+          "response": []
+        },
+        {
+          "name": "Read current policy",
+          "request": { "method": "GET", "header": [], "url": "{{baseUrl}}/api/policies/terms?locale={{locale}}", "description": "Kinds: delivery_returns, terms, privacy, cookies, accessibility. Optional version selects an exact published policy version." },
+          "response": []
+        },
+        {
+          "name": "Read cookie configuration",
+          "request": { "method": "GET", "header": [], "url": "{{baseUrl}}/api/cookie-config?locale={{locale}}", "description": "Resolves the exact configured published cookies-policy version. No optional tracking provider is invented." },
+          "response": []
+        },
+        {
+          "name": "Read published SEO URL feed (production only)",
+          "request": { "method": "GET", "header": [], "url": "{{baseUrl}}/api/seo/urls?limit=10", "description": "Development intentionally returns404 with noindex. Production returns items and next_cursor; pass next_cursor as after_id to continue. Contains only eligible current published canonical URLs, alternates and truthful lastmod." },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Catalogue administration",
+      "description": "Set productVersion from current admin detail. Retain each operation request ID and exact payload for retries; regenerate only for a new intentional operation.",
+      "item": [
+        {
+          "name": "Save complete draft replacement",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              { "key": "Origin", "value": "{{frontendOrigin}}" },
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "X-Dev-Staff-Token", "value": "{{devStaffAuthToken}}" },
+              { "key": "X-CSRF-Token", "value": "{{devStaffCsrfToken}}" }
+            ],
+            "body": { "mode": "raw", "raw": "{\n  \"request_id\": \"{{draftSaveRequestId}}\",\n  \"expected_version\": {{productVersion}},\n  \"draft\": {{draftJson}}\n}", "options": { "raw": { "language": "json" } } },
+            "url": "{{baseUrl}}/api/admin/catalogue/{{productId}}/draft",
+            "description": "Set draftJson to the COMPLETE JSON object from current admin detail draft, preserving nullable fields, image IDs and material/gemstone/fulfilment arrays. Empty default is intentionally invalid. Edit desired fields before sending. If there is no draft, supply the complete replacement contract from README. Save never releases changes or changes live routes. Archive exits additionally require confirm_archive_exit:true and a reviewed reason/note."
+          },
+          "response": []
+        },
+        {
+          "name": "Read actor-owned import batch",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "Origin", "value": "{{frontendOrigin}}" },
+              { "key": "X-Dev-Staff-Token", "value": "{{devStaffAuthToken}}" },
+              { "key": "X-CSRF-Token", "value": "{{devStaffCsrfToken}}" }
+            ],
+            "url": "{{baseUrl}}/api/admin/catalogue/imports/{{batchId}}"
+          },
+          "response": []
+        },
+        {
+          "name": "Hide published product",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Origin", "value": "{{frontendOrigin}}" },
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "X-Dev-Staff-Token", "value": "{{devStaffAuthToken}}" },
+              { "key": "X-CSRF-Token", "value": "{{devStaffCsrfToken}}" }
+            ],
+            "body": { "mode": "raw", "raw": "{\n  \"request_id\": \"{{visibilityRequestId}}\",\n  \"expected_version\": {{productVersion}},\n  \"publication_status\": \"hidden\",\n  \"reason\": \"management_decision\",\n  \"note\": \"REPLACE_WITH_ACTUAL_VISIBILITY_REASON\"\n}", "options": { "raw": { "language": "json" } } },
+            "url": "{{baseUrl}}/api/admin/catalogue/{{productId}}/visibility",
+            "description": "Requires development publication flag. To restore use publication_status:published with a NEW request ID and current version; requires existing released revision, routes and ready media. Never publishes a draft."
+          },
+          "response": []
+        },
+        {
+          "name": "Register reviewed media metadata (development only)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Origin", "value": "{{frontendOrigin}}" },
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "X-Dev-Staff-Token", "value": "{{devStaffAuthToken}}" },
+              { "key": "X-CSRF-Token", "value": "{{devStaffCsrfToken}}" }
+            ],
+            "body": { "mode": "raw", "raw": "{\n  \"request_id\": \"{{mediaRegisterRequestId}}\",\n  \"version\": \"{{mediaVersion}}\",\n  \"receipt_sha256\": \"{{mediaReceiptSha256}}\",\n  \"images\": {{reviewedImagesJson}}\n}", "options": { "raw": { "language": "json" } } },
+            "url": "{{baseUrl}}/api/admin/catalogue/{{productId}}/media-releases",
+            "description": "Set reviewedImagesJson to 1–50 image objects: logical_image_id, role, original_relative_path, alt_bg, alt_en, processed_with_ai, on_model_illustrative, derivatives. Each derivative has size,width,height,object_key,mime,colour_space,bytes,sha256; exact sizes200/400/800/1600, square WebP/sRGB. Paths: SSG-ID_org/IMAGE_ID.jpg and products/SSG-ID/vN/IMAGE_ID-SIZE.webp. Receipt must be64 lowercase hex characters. Empty defaults are intentionally invalid. DEV_CATALOGUE_PUBLISH_ENABLED required. Metadata approval stores attribution/hash but does not inspect actual bytes, authenticate a receipt or prove human review. Select returned release/asset IDs in draft save before publication."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Verified inventory",
+      "description": "Synthetic shapes only: replace evidence, timestamps, barcodes and prices with physically verified facts before writing real data. Retain operation request IDs for retries; regenerate only for new operations. Separate stock adapter authentication is required for /internal commands.",
+      "item": [
+        {
+          "name": "Promote verified imported unit",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Origin", "value": "{{frontendOrigin}}" },
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "X-Dev-Staff-Token", "value": "{{devStaffAuthToken}}" },
+              { "key": "X-CSRF-Token", "value": "{{devStaffCsrfToken}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"request_id\": \"{{promotionRequestId}}\",\n  \"batch_id\": \"{{batchId}}\",\n  \"ssg_id\": \"{{ssgId}}\",\n  \"barcode\": \"{{barcode}}\",\n  \"location_code\": \"sofia\",\n  \"stock_status\": \"available\",\n  \"price\": null,\n  \"currency\": null,\n  \"weight_g\": null,\n  \"stone_weight_ct\": null,\n  \"dimensions_mm\": null,\n  \"verified_at\": \"2026-10-31T10:00:00.000Z\",\n  \"source_ref\": \"REPLACE_WITH_ACTUAL_VERIFICATION\",\n  \"transfer_to\": null,\n  \"reservation_reference\": null,\n  \"sale\": null\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": "{{baseUrl}}/api/admin/catalogue/staged-units/promote",
+            "description": "Requires committed batch/barcode ownership, no existing live unit and explicit current physical verification. Does not publish or exit archive. First creation201, matching replay200."
+          },
+          "response": []
+        },
+        {
+          "name": "Replace verified unit details",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              { "key": "Origin", "value": "{{frontendOrigin}}" },
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "X-Dev-Staff-Token", "value": "{{devStaffAuthToken}}" },
+              { "key": "X-CSRF-Token", "value": "{{devStaffCsrfToken}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"request_id\": \"{{unitDetailsRequestId}}\",\n  \"expected_version\": {{stockVersion}},\n  \"price\": null,\n  \"currency\": null,\n  \"weight_g\": null,\n  \"stone_weight_ct\": null,\n  \"dimensions_mm\": null,\n  \"verified_at\": \"2026-10-31T10:00:00.000Z\",\n  \"source_ref\": \"REPLACE_WITH_ACTUAL_VERIFICATION\",\n  \"reason\": \"data_check\",\n  \"note\": \"REPLACE_WITH_ACTUAL_CORRECTION_REASON\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": "{{baseUrl}}/api/admin/stock/{{stockItemId}}/details",
+            "description": "Full replacement of price and measurement facts only. Null price disables pricing. Does not change stock lifecycle or historical order/sale amounts."
+          },
+          "response": []
+        },
+        {
+          "name": "Record physical absence (trusted dev adapter)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Origin", "value": "{{frontendOrigin}}" },
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "X-Dev-Stock-Token", "value": "{{devStockAuthToken}}" },
+              { "key": "X-CSRF-Token", "value": "{{devStockCsrfToken}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"request_id\": \"{{stockAbsenceRequestId}}\",\n  \"expected_version\": {{stockVersion}},\n  \"source_event_id\": \"REPLACE_WITH_UNIQUE_ABSENCE_EVENT\",\n  \"evidence_ref\": \"REPLACE_WITH_ACTUAL_EVIDENCE\",\n  \"reason\": \"data_check\",\n  \"note\": \"REPLACE_WITH_ACTUAL_ABSENCE_NOTE\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": "{{baseUrl}}/internal/stock/{{stockItemId}}/physical-absence",
+            "description": "Separate DEV_STOCK_FACT_AUTH_ENABLED gate, live service principal stock_fact_write and distinct adapter credentials required. Unregistered in production. Blocks unsold stock; no sale is inferred."
+          },
+          "response": []
+        },
+        {
+          "name": "Record actual store sale (trusted dev adapter)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Origin", "value": "{{frontendOrigin}}" },
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "X-Dev-Stock-Token", "value": "{{devStockAuthToken}}" },
+              { "key": "X-CSRF-Token", "value": "{{devStockCsrfToken}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"request_id\": \"{{stockSaleRequestId}}\",\n  \"expected_version\": {{stockVersion}},\n  \"source_event_id\": \"REPLACE_WITH_UNIQUE_SALE_EVENT\",\n  \"store_code\": \"sofia\",\n  \"document_ref\": \"REPLACE_WITH_ACTUAL_SALE_DOCUMENT\",\n  \"sold_at\": \"2026-10-31T10:00:00.000Z\",\n  \"amount\": \"50.00\",\n  \"currency\": \"EUR\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": "{{baseUrl}}/internal/stock/{{stockItemId}}/store-sale",
+            "description": "Actual documented sale only; example price/currency are synthetic. Separate trusted adapter auth required. Source event replay survives observed version changes; contradictory sale facts conflict. All actual units sold autoarchives without publishing drafts."
           },
           "response": []
         }

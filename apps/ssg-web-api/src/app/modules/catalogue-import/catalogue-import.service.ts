@@ -3,6 +3,7 @@ import {
   ConflictException,
   Injectable,
   Logger,
+  NotFoundException,
   PayloadTooLargeException,
   ServiceUnavailableException,
 } from '@nestjs/common';
@@ -300,6 +301,44 @@ export class CatalogueImportService {
         this.logger.warn(
           `Catalogue import preflight storage is unavailable${diagnostic}`,
         );
+        throw new ServiceUnavailableException({
+          code: 'TEMPORARY_UNAVAILABLE',
+          message_key: 'errors.temporary_unavailable',
+        });
+      }
+      throw error;
+    }
+  }
+
+  async read(actorId: string, batchId: string): Promise<ImportResult> {
+    try {
+      const batch = await this.prisma.importBatch.findFirst({
+        where: { id: batchId, actorId },
+        select: {
+          id: true,
+          state: true,
+          report: true,
+          from_ImportProductRow_batchId: {
+            orderBy: { ssgId: 'asc' },
+            select: { ssgId: true, state: true, productId: true },
+          },
+        },
+      });
+      if (!batch) {
+        throw new NotFoundException({
+          code: 'NOT_FOUND',
+          message_key: 'errors.not_found',
+        });
+      }
+      return this.toResult(batch);
+    } catch (error) {
+      if (error instanceof NotFoundException) throw error;
+      if (
+        error instanceof Prisma.PrismaClientKnownRequestError ||
+        error instanceof Prisma.PrismaClientUnknownRequestError ||
+        error instanceof Prisma.PrismaClientInitializationError
+      ) {
+        this.logger.warn('Catalogue import read storage is unavailable');
         throw new ServiceUnavailableException({
           code: 'TEMPORARY_UNAVAILABLE',
           message_key: 'errors.temporary_unavailable',

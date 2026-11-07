@@ -1,5 +1,6 @@
 import {
-  BadRequestException, Injectable, Logger, NotFoundException, ServiceUnavailableException,
+  BadRequestException, ConflictException, Injectable, Logger, NotFoundException,
+  ServiceUnavailableException,
 } from '@nestjs/common';
 import { isUUID } from 'class-validator';
 import { Prisma } from '../../../generated/prisma/client';
@@ -46,6 +47,84 @@ const REVISION_SELECT = {
   },
 } satisfies Prisma.ProductRevisionSelect;
 type Revision = Prisma.ProductRevisionGetPayload<{ select: typeof REVISION_SELECT }>;
+
+export async function cloneProductRevisionToDraft(
+  transaction: Prisma.TransactionClient,
+  productId: string,
+  sourceRevisionId: string,
+  actorId: string,
+): Promise<Prisma.ProductRevisionGetPayload<object>> {
+  const source = await transaction.productRevision.findUnique({
+    where: { id: sourceRevisionId },
+    include: {
+      from_ProductTranslation_revisionId: true,
+      from_RevisionMaterial_revisionId: true,
+      from_RevisionGemstone_revisionId: true,
+      from_RevisionImage_revisionId: true,
+    },
+  });
+  if (!source || source.productId !== productId || source.state !== 'published') {
+    throw new ConflictException({
+      code: 'VERSION_CONFLICT', message_key: 'errors.version_conflict',
+    });
+  }
+  const latest = await transaction.productRevision.aggregate({
+    where: { productId },
+    _max: { revisionNumber: true },
+  });
+  const created = await transaction.productRevision.create({
+    data: {
+      productId,
+      revisionNumber: (latest._max.revisionNumber ?? 0) + 1,
+      createdById: actorId,
+      jewelleryTypeId: source.jewelleryTypeId,
+      materialsState: source.materialsState,
+      gemstonesState: source.gemstonesState,
+      salesMode: source.salesMode,
+      priceVisibility: source.priceVisibility,
+      fulfilmentMethods: source.fulfilmentMethods,
+      deliveryScope: source.deliveryScope,
+      deliveryLocalityIds: source.deliveryLocalityIds,
+      pickupLocationCodes: source.pickupLocationCodes,
+      mediaReleaseId: source.mediaReleaseId,
+      changeReason: source.changeReason,
+      changeNote: source.changeNote,
+    },
+  });
+  for (const text of source.from_ProductTranslation_revisionId) {
+    const { id, revisionId, ...data } = text;
+    void id;
+    void revisionId;
+    await transaction.productTranslation.create({
+      data: { ...data, revisionId: created.id },
+    });
+  }
+  for (const material of source.from_RevisionMaterial_revisionId) {
+    await transaction.revisionMaterial.create({
+      data: {
+        revisionId: created.id,
+        materialId: material.materialId,
+        finenessId: material.finenessId,
+        goldKaratId: material.goldKaratId,
+      },
+    });
+  }
+  for (const gemstone of source.from_RevisionGemstone_revisionId) {
+    await transaction.revisionGemstone.create({
+      data: { revisionId: created.id, gemstoneId: gemstone.gemstoneId },
+    });
+  }
+  for (const image of source.from_RevisionImage_revisionId) {
+    await transaction.revisionImage.create({
+      data: {
+        revisionId: created.id,
+        assetId: image.assetId,
+        sortOrder: image.sortOrder,
+      },
+    });
+  }
+  return created;
+}
 
 export function catalogueSlugPreview(title: string | null, locale: Locale): string | null {
   if (!title) return null;

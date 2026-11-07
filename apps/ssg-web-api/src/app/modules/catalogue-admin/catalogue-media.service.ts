@@ -21,7 +21,10 @@ import {
   configurationUrl,
   projectMedia,
 } from "../products/product-read.service";
-import { CatalogueAdminService } from "./catalogue-admin.service";
+import {
+  CatalogueAdminService,
+  cloneProductRevisionToDraft,
+} from "./catalogue-admin.service";
 import {
   CatalogueMediaRequestDto,
   CatalogueImageMetadataDto,
@@ -446,69 +449,14 @@ export class CatalogueMediaService {
     if (draft) return draft;
     const product = await tx.product.findUniqueOrThrow({
       where: { id: productId },
+      select: { currentRevisionId: true },
     });
     if (!product.currentRevisionId) throw new ConflictException();
-    const live = await tx.productRevision.findUniqueOrThrow({
-      where: { id: product.currentRevisionId },
-      include: {
-        from_ProductTranslation_revisionId: true,
-        from_RevisionMaterial_revisionId: true,
-        from_RevisionGemstone_revisionId: true,
-        from_RevisionImage_revisionId: true,
-      },
-    });
-    const latest = await tx.productRevision.aggregate({
-      where: { productId },
-      _max: { revisionNumber: true },
-    });
-    const created = await tx.productRevision.create({
-      data: {
-        productId,
-        revisionNumber: (latest._max.revisionNumber ?? 0) + 1,
-        createdById: actorId,
-        jewelleryTypeId: live.jewelleryTypeId,
-        materialsState: live.materialsState,
-        gemstonesState: live.gemstonesState,
-        salesMode: live.salesMode,
-        priceVisibility: live.priceVisibility,
-        fulfilmentMethods: live.fulfilmentMethods,
-        deliveryScope: live.deliveryScope,
-        deliveryLocalityIds: live.deliveryLocalityIds,
-        pickupLocationCodes: live.pickupLocationCodes,
-        mediaReleaseId: live.mediaReleaseId,
-        changeReason: live.changeReason,
-        changeNote: live.changeNote,
-      },
-    });
-    for (const text of live.from_ProductTranslation_revisionId) {
-      const { id, revisionId, ...data } = text;
-      void id;
-      void revisionId;
-      await tx.productTranslation.create({
-        data: { ...data, revisionId: created.id },
-      });
-    }
-    for (const material of live.from_RevisionMaterial_revisionId)
-      await tx.revisionMaterial.create({
-        data: {
-          revisionId: created.id,
-          materialId: material.materialId,
-          finenessId: material.finenessId,
-          goldKaratId: material.goldKaratId,
-        },
-      });
-    for (const gemstone of live.from_RevisionGemstone_revisionId)
-      await tx.revisionGemstone.create({
-        data: { revisionId: created.id, gemstoneId: gemstone.gemstoneId },
-      });
-    for (const image of live.from_RevisionImage_revisionId)
-      await tx.revisionImage.create({
-        data: {
-          revisionId: created.id,
-          assetId: image.assetId,
-          sortOrder: image.sortOrder,
-        },
-      });
-    return created;
+    return cloneProductRevisionToDraft(
+      tx,
+      productId,
+      product.currentRevisionId,
+      actorId,
+    );
   }
 }

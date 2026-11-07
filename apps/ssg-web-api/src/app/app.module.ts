@@ -17,6 +17,8 @@ import { CatalogueImportModule } from './modules/catalogue-import/catalogue-impo
 import { CatalogueAdminModule } from './modules/catalogue-admin/catalogue-admin.module';
 import { EnquiryModule } from './modules/enquiries/enquiry.module';
 import { SearchModule } from './modules/search/search.module';
+import { InventoryModule } from './modules/inventory/inventory.module';
+import { PublicContentModule } from './modules/public-content/public-content.module';
 
 @Module({
   imports: [
@@ -37,6 +39,8 @@ import { SearchModule } from './modules/search/search.module';
     CatalogueAdminModule,
     EnquiryModule,
     SearchModule,
+    InventoryModule.register(),
+    PublicContentModule,
     HealthModule,
     DictionaryModule,
   ],
