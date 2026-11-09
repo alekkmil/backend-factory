@@ -355,7 +355,10 @@ export class PublicContentService {
   }
 
   async home(locale: Locale) {
-    return this.read(async (transaction) => {
+    return this.read((transaction) => this.homeInTransaction(transaction, locale));
+  }
+
+  async homeInTransaction(transaction: ReadTransaction, locale: Locale) {
       const homeRecords = await transaction.contentRecord.findMany({
         where: {
           type: 'home',
@@ -460,7 +463,6 @@ export class PublicContentService {
         });
       }
       return { locale, sections };
-    });
   }
 
   async stores(locale: Locale): Promise<{ items: StoreDto[] }> {
@@ -497,7 +499,7 @@ export class PublicContentService {
     );
   }
 
-  private async siteContactsInTransaction(
+  async siteContactsInTransaction(
     transaction: ReadTransaction,
     locale: Locale,
   ) {
@@ -582,7 +584,10 @@ export class PublicContentService {
   }
 
   async cookieConfig(locale: Locale) {
-    return this.read(async (transaction) => {
+    return this.read((transaction) => this.cookieConfigInTransaction(transaction, locale));
+  }
+
+  async cookieConfigInTransaction(transaction: ReadTransaction, locale: Locale) {
       const settings = await transaction.shopSettings.findUnique({
         where: { id: 1 },
         select: { cookieConfig: true },
@@ -664,7 +669,6 @@ export class PublicContentService {
         providers,
         persistence_days: persistenceDays,
       };
-    });
   }
 
   async seoUrls(query: SeoUrlsQueryDto) {
@@ -1134,10 +1138,63 @@ export class PublicContentService {
     };
   }
 
+  async validateContent(
+    transaction: ReadTransaction,
+    input: {
+      type: ContentType;
+      special_data: Prisma.JsonObject;
+      author_id: string | null;
+      translations: {
+        locale: Locale;
+        title: string;
+        intro: string | null;
+        seo_title: string | null;
+        seo_description: string | null;
+        sections: Prisma.JsonObject[];
+      }[];
+    },
+  ): Promise<void> {
+    this.siteOrigin();
+    for (const translation of input.translations) {
+      requiredString(translation.title, 250);
+      nullableString(translation.intro, 3000);
+      nullableString(translation.seo_title, 250);
+      nullableString(translation.seo_description, 1000);
+      await this.projectSpecial(
+        transaction, input.type, input.special_data, input.author_id, translation.locale,
+      );
+      await this.projectSections(transaction, translation.sections, translation.locale, true);
+    }
+  }
+
+  async validateLink(
+    transaction: ReadTransaction,
+    target: Prisma.JsonObject,
+    label: string | null,
+    locale: Locale,
+  ): Promise<void> {
+    const parsed = this.linkTarget(target);
+    if (label !== null) requiredString(label, 255);
+    const resolved = await this.resolveTarget(transaction, parsed, label ?? 'link', locale);
+    if (!resolved) unavailable('LINK_TARGET_UNAVAILABLE', 'errors.validation');
+  }
+
+  validatePolicy(input: { title: string; text: string; url: string }): void {
+    this.siteOrigin();
+    requiredString(input.title, 250);
+    requiredString(input.text, 100000);
+    this.policyUrl(input.url);
+  }
+
+  assertWebsiteConfiguration(): void {
+    this.siteOrigin();
+  }
+
   private async projectSections(
     transaction: ReadTransaction,
     value: Prisma.JsonValue,
     locale: Locale,
+    requireResolvedLinks = false,
   ) {
     const rawSections = arrayValue(value, 200);
     const sections: (
@@ -1188,6 +1245,7 @@ export class PublicContentService {
             label,
             locale,
           );
+          if (requireResolvedLinks && !link) unavailable('LINK_TARGET_UNAVAILABLE', 'errors.validation');
           let media: ReturnType<typeof projectMedia> | null = null;
           if (card.media_id !== null) {
             const mediaId = requiredString(card.media_id, 36);
@@ -1246,6 +1304,7 @@ export class PublicContentService {
               label,
               locale,
             );
+            if (requireResolvedLinks && !resolved) unavailable('LINK_TARGET_UNAVAILABLE', 'errors.validation');
             if (resolved) links.push(resolved);
           }
           items.push({
@@ -1489,7 +1548,7 @@ export class PublicContentService {
     return null;
   }
 
-  private async storeDto(
+  async storeDto(
     transaction: ReadTransaction,
     row: { code: LocationCode; publicData: Prisma.JsonValue },
     locale: Locale,

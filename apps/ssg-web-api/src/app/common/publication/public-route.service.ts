@@ -20,7 +20,7 @@ export type RouteResolution =
     }
   | { state: 'redirect'; location: string };
 
-function normalizePath(path: string, locale: Locale): string {
+export function normalizePublicPath(path: string, locale: Locale): string {
   const hasControlCharacters = [...path].some((character) => {
     const code = character.charCodeAt(0);
     return code <= 0x1f || code === 0x7f;
@@ -57,7 +57,7 @@ export class PublicRouteService {
   ) {}
 
   async resolve(path: string, locale: Locale): Promise<RouteResolution> {
-    const normalizedPath = normalizePath(path, locale);
+    const normalizedPath = normalizePublicPath(path, locale);
     try {
       const route = await this.prisma.publicRoute.findUnique({
         where: { path: normalizedPath },
