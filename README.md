@@ -291,7 +291,151 @@ listed. Development returns 404 with `X-Robots-Tag: noindex, nofollow, noarchive
 so a public development sitemap cannot be exposed accidentally.
 All these endpoints validate query parameters and use no-store freshness.
 Missing/invalid required source data fails explicitly; implementation does not
-populate HOME, policy, contact or store content in your database.
+populate HOME, policy, contact or store content in your database on reads.
+
+### Development website content management
+
+All routes below use the same development-only `StaffTokenGuard` as catalogue
+import: `DEV_STAFF_AUTH_ENABLED=true`, `X-Dev-Staff-Token`, `X-CSRF-Token`
+and an allowed `Origin`. They reject production authentication. Saves update
+the public data directly when a translation has `published: true`; no separate
+publication call is required. Unpublished translations stay out of public
+responses. Existing product import/media/publication endpoints remain unchanged.
+
+| Operation | Endpoint |
+| --- | --- |
+| Read/upsert a page by its stable key | `GET / PUT /api/admin/website/content/:key` |
+| Read/upsert Sofia or Nessebar store details | `GET / PUT /api/admin/website/stores/:code` |
+| Read/upsert both language versions of a policy | `GET / PUT /api/admin/website/policies/:kind/:version` |
+| Read/update public contacts, cookie configuration or coordinator email | `GET / PATCH /api/admin/website/settings` |
+
+Every write needs a UUID `request_id`. A matching actor/resource/request/payload
+replays the original result; a changed payload under that request ID returns
+409. Use a new request ID for edits. Writes are atomic and enqueue the existing
+cache-invalidation outbox intent; delivery requires a configured handler.
+No migrations or new tables are needed.
+
+For page/store creation, send `expected_updated_at: null`. For edits, GET first
+and pass its `updated_at` as `expected_updated_at`; stale edits return 409.
+PUT replaces the entire editable record, including both BG/EN translations and
+the complete ordered link array. Omitted links are removed, not merged.
+GET output includes read-only fields: do not send `id`, `updated_at`, or
+`replayed` back in a PUT.
+
+Homepage example (`PUT /api/admin/website/content/home`):
+
+```json
+{
+  "request_id": "<new UUID>",
+  "expected_updated_at": null,
+  "type": "home",
+  "parent_id": null,
+  "author_id": null,
+  "special_data": {
+    "kind": "home",
+    "section_keys": [
+      "hero", "categories", "campaigns", "selected_products",
+      "engagement_wedding", "knowledge", "services", "heritage",
+      "stories", "consultation_stores", "footer"
+    ]
+  },
+  "translations": [
+    {
+      "locale": "bg", "path": "/", "published": true,
+      "title": "SSG", "intro": null,
+      "seo_title": null, "seo_description": null, "sections": []
+    },
+    {
+      "locale": "en", "path": "/en/", "published": true,
+      "title": "SSG", "intro": null,
+      "seo_title": null, "seo_description": null, "sections": []
+    }
+  ],
+  "links": [
+    {
+      "slot": "selected_products", "sort_order": 1,
+      "target": { "kind": "product", "id": "<published product UUID>" },
+      "label_bg": null, "label_en": null
+    }
+  ]
+}
+```
+
+Then `GET /api/home?locale=en` returns the selected product summaries in the
+`selected_products` section's `products` array, including live prices/media.
+It does not automatically select every published product. Hero/category/etc.
+content can be represented by links to published content records in those
+slots. The existing HOME response keeps `content: null` and exposes linked
+records/products/stores/links in each section. Only one HOME record is allowed.
+
+Other page types use the same request envelope: `hub`, `selection`, `knowledge`,
+`service`, `article`, `case_study`, `press`, `author`, `guide`, `faq`, `contact`.
+`type` cannot be changed after creation. `special_data.kind` must match the
+type; use the existing source contract:
+
+| Type | Additional `special_data` keys |
+| --- | --- |
+| `hub`, `selection` | `selector_key` (nullable string) |
+| `knowledge` | `topic_code`, `gemstone_codes`, `bg`, `en`; each language object has `name`, `heading`, `lead`, exactly two `detail_paragraphs` |
+| `service` | `topic_code`, `scope_bg`, `scope_en`, `enquiry_topic` |
+| `article`, `case_study` | `event_at` (nullable date), `sources` (URL array), `evidence_ref` (nullable private string) |
+| `press` | `publisher`, `source_url`, `source_date` (nullable date) |
+| `author` | `verified_role_bg`, `verified_role_en` (nullable), `portrait_id` (nullable approved media UUID) |
+| `guide` | `unit_codes` (string array) |
+| `faq`, `contact` | No extra keys |
+
+Translation `sections` accept the existing `text`, `image`, `link_cards`,
+`data_table` and `faq` source JSON shapes validated by
+[PublicContentService](apps/ssg-web-api/src/app/modules/public-content/public-content.service.ts).
+For example: `{"kind":"text","heading":null,"text":"Confirmed plain text."}`.
+Image sections reference existing approved assets:
+`{"kind":"image","media_id":"<approved UUID>","caption":null}`.
+No raw HTML or arbitrary/unverified media is accepted.
+Content images are referenced by UUID, not uploaded through these JSON endpoints.
+
+Link targets are exactly one of:
+`{kind:"product",id}`, `{kind:"content",id}`, `{kind:"store",code}`,
+`{kind:"route",route_id}`, `{kind:"external",url}`.
+Related entities/media must already exist and internal link targets must
+resolve publicly in both supplied locales. Parent/author references are checked;
+hierarchy cycles, unavailable targets and duplicate slot/order pairs are rejected.
+Create referenced pages first, then update the HOME record to link them.
+Route paths are locale-aware (`/en/...` for English), must be unoccupied,
+and cannot be renamed through this endpoint: historical route identity is
+immutable. Existing route ownership is never reassigned.
+
+Store PUT uses `{request_id,expected_updated_at,public_data}`.
+`public_data` requires `bg` and `en`, each with `name`, `address`,
+`opening_hours` and `seasonal_note` (last two nullable), plus top-level nullable
+`phone`, `email`, `maps_url` and an approved-media UUID array `media_ids`.
+Only the existing `sofia`/`nessebar` codes are supported; no stock or sales are
+created when editing a store.
+
+Policy PUT uses `{request_id,expected_current_version,translations}` with
+exactly BG/EN entries `{locale,title,text,url}`. `url` is the absolute public
+website URL, not the API URL; it must use the configured website origin,
+the correct locale path (`/en/...` for English), and no query or fragment.
+`expected_current_version` is null for initial
+creation or the current version label for replacement. Saving makes both
+translations published/current and retains older versions as non-current.
+Policy text/identity is immutable even before publication: edits require a
+new version label. Matching text on an existing version can be upserted.
+When replacing the current cookies policy, an existing configured
+`cookie_config.policy_version` is advanced atomically and the settings version
+increases; both language policy versions are created together.
+
+Settings PATCH requires `{request_id,expected_version}` and at least one of
+`site_contacts`, `cookie_config`, `coordinator_email` (nullable).
+GET returns the current `version`; stale updates return 409.
+It cannot change currency, purchasing allowlists, prices or `ready`, and
+requires an existing `ShopSettings` row.
+`site_contacts` contains nullable `phone`/`email`, `store_codes` and
+`verified_links` (`label_bg`, `label_en`, `url`).
+`cookie_config` contains `version`, `policy_version`, `necessary_enabled:true`,
+`optional_categories`, `providers` and nullable `persistence_days`.
+Each provider requires `id`, `category` (`analytics`/`marketing`), `name`,
+`purpose_bg`, `purpose_en`. Save the matching published cookies policies before
+configuring cookies. These writes do not invent consent choices or policy text.
 
 ### Catalogue draft editing, visibility and reviewed-media registration
 
