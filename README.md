@@ -269,13 +269,58 @@ These additions use existing tables and require no new migration.
 Locale is `bg` or `en`. Content list responses are `{items,total,page,page_size}`;
 details include resolved public sections/links, public type-specific fields,
 related published products, alternate URLs and truthful publication dates.
+`related_products` resolves the ordered product targets in a content record's
+`related_products` links slot (falling back to the legacy product relation when
+that slot is empty). `children` lists explicit `children` links first, then
+published direct descendants from `parent_id` not already linked.
 Only published translations and current routes are eligible. Private editorial
 evidence and source JSON identifiers are not exposed as public content.
 Internal targets are resolved against published entities; external links and
 source media must pass the configured-origin/approved-media checks.
 
 HOME uses the configured published HOME record, not a fabricated landing page.
-Its `{locale,sections}` response preserves the source's 11 section keys.
+Its `{locale,sections}` response preserves the source's 11 section keys and
+adds `content_blocks` to each section. The HOME translation's ordered source
+blocks map as follows: block 0 to `hero`, block 1 to `consultation_stores`, and
+blocks 2 onward to `categories` (the current content has category copy followed
+by five category images). These blocks are projected with approved media URLs;
+they are separate from linked records/products/stores. `content` remains null.
+HOME `primary_image` is null in `/api/content/:id`; a category image must not be
+mistaken for a hero image. `/api/home` provides the mapped content directly, so
+no second HOME detail request is needed.
+
+For example, `hero.content_blocks` contains the first localized HOME section;
+`categories.content_blocks` contains the category copy and image blocks:
+
+```json
+{
+  "key": "categories",
+  "content": null,
+  "content_blocks": [
+    { "kind": "text", "heading": "Categories", "text": "Localized copy" },
+    {
+      "kind": "image",
+      "media": {
+        "id": "<media UUID>",
+        "urls": { "default": "<CDN URL>", "w200": "<CDN URL>", "w400": "<CDN URL>", "w800": "<CDN URL>", "w1600": "<CDN URL>" },
+        "width": 1600,
+        "height": 1067,
+        "alt": "Localized alternative text",
+        "ai_disclosure_required": false,
+        "on_model_illustrative": false
+      },
+      "caption": null
+    }
+  ],
+  "products": [],
+  "records": [],
+  "stores": [],
+  "links": []
+}
+```
+
+Bulgarian and English HOME responses have this same structure with localized
+text, alt text and URLs; link targets use their corresponding localized route.
 Stores expose localized verified public data and approved media. Site contacts
 resolve configured store codes and verified links; no coordinator mailbox or
 other internal commerce configuration is returned. Policies return the requested
@@ -304,6 +349,7 @@ responses. Existing product import/media/publication endpoints remain unchanged.
 
 | Operation | Endpoint |
 | --- | --- |
+| Upload, process and approve editorial/boutique images | `POST /api/admin/website/media` |
 | Read/upsert a page by its stable key | `GET / PUT /api/admin/website/content/:key` |
 | Read/upsert Sofia or Nessebar store details | `GET / PUT /api/admin/website/stores/:code` |
 | Read/upsert both language versions of a policy | `GET / PUT /api/admin/website/policies/:kind/:version` |
@@ -313,7 +359,52 @@ Every write needs a UUID `request_id`. A matching actor/resource/request/payload
 replays the original result; a changed payload under that request ID returns
 409. Use a new request ID for edits. Writes are atomic and enqueue the existing
 cache-invalidation outbox intent; delivery requires a configured handler.
-No migrations or new tables are needed.
+Editorial media is separately stored from product media and requires the
+`20261110140000_add_website_editorial_media` migration. Do not apply migrations
+outside the normal reviewed deployment process.
+
+Editorial upload is multipart form data, gated by the same dev staff auth and
+`DEV_CATALOGUE_PUBLISH_ENABLED=true` (non-production only). Add a text part
+named `metadata` containing `{"request_id":"<UUID>","images":[...]}` and one
+file part named `image_<client_key>` per image. Each image entry has
+`client_key`, localized `alt_bg`/`alt_en`, and `processed_with_ai`. Upload
+between one and five JPEG/PNG/WebP images, each at most 10 MiB and with a
+minimum 1600-pixel long edge. The API strips source metadata, generates
+aspect-preserving WebP variants at 200/400/800/1600 pixels, stores the original
+privately, and returns an approved `media.id` plus BG/EN public variants.
+Publishing the media makes the assets usable, but does not publish a page or
+store; reference the returned UUID in a published content section or store.
+Use a new request ID for new bytes/metadata; approved media is immutable.
+
+Examples of references:
+
+```json
+{"kind":"image","media_id":"<media UUID>","caption":null}
+```
+
+```json
+{"kind":"link_cards","items":[{"label":"Rings","text":null,"target":{"kind":"route","route_id":"R003"},"media_id":"<media UUID>"}]}
+```
+
+```json
+{"media_ids":["<media UUID>"]}
+```
+
+Upload example (select an actual image at `./hero.jpg`; do not commit staff
+tokens):
+
+```sh
+curl --fail-with-body --request POST "$BASE_URL/api/admin/website/media" \
+  --header "Origin: $FRONTEND_ORIGIN" \
+  --header "X-Dev-Staff-Token: $DEV_STAFF_AUTH_TOKEN" \
+  --header "X-CSRF-Token: $DEV_STAFF_CSRF_TOKEN" \
+  --form 'metadata={"request_id":"<new UUID>","images":[{"client_key":"hero","alt_bg":"<approved Bulgarian alt text>","alt_en":"<approved English alt text>","processed_with_ai":false}]}' \
+  --form 'image_hero=@./hero.jpg'
+```
+
+Use the returned `assets[0].id` as the UUID in the image examples above.
+The response includes `media.bg` and `media.en` projections with URLs and the
+localized alt text. The same UUID can be used in a store's `media_ids`.
 
 For page/store creation, send `expected_updated_at: null`. For edits, GET first
 and pass its `updated_at` as `expected_updated_at`; stale edits return 409.
@@ -363,6 +454,10 @@ Homepage example (`PUT /api/admin/website/content/home`):
 
 Then `GET /api/home?locale=en` returns the selected product summaries in the
 `selected_products` section's `products` array, including live prices/media.
+It also projects HOME translation blocks into `hero.content_blocks`,
+`consultation_stores.content_blocks`, and `categories.content_blocks`, as
+described above. Static catalogue route targets R002-R007 resolve to their
+localized registered URLs without needing a database-owned `PublicRoute`.
 It does not automatically select every published product. Hero/category/etc.
 content can be represented by links to published content records in those
 slots. The existing HOME response keeps `content: null` and exposes linked
@@ -400,6 +495,8 @@ Related entities/media must already exist and internal link targets must
 resolve publicly in both supplied locales. Parent/author references are checked;
 hierarchy cycles, unavailable targets and duplicate slot/order pairs are rejected.
 Create referenced pages first, then update the HOME record to link them.
+The registered catalogue listing routes R002-R007 are static frontend destinations
+and resolve directly; they do not represent database-published content records.
 Route paths are locale-aware (`/en/...` for English), must be unoccupied,
 and cannot be renamed through this endpoint: historical route identity is
 immutable. Existing route ownership is never reassigned.
@@ -407,9 +504,26 @@ immutable. Existing route ownership is never reassigned.
 Store PUT uses `{request_id,expected_updated_at,public_data}`.
 `public_data` requires `bg` and `en`, each with `name`, `address`,
 `opening_hours` and `seasonal_note` (last two nullable), plus top-level nullable
-`phone`, `email`, `maps_url` and an approved-media UUID array `media_ids`.
+`phone`, `email`, optional `emails` (up to five unique addresses; `email` remains
+the backward-compatible primary address), `maps_url` and an approved-media
+UUID array `media_ids`.
 Only the existing `sofia`/`nessebar` codes are supported; no stock or sales are
-created when editing a store.
+created when editing a store. Public store responses include both `email`
+(primary, for compatibility) and `emails` (always an array). For Nessebar,
+the approved pair is `["nesebarg@ssg.bg","nesebarm@ssg.bg"]`; use the first as
+the compatibility `email`. `/api/site-contacts` returns its own contact
+`emails` and includes the localized store objects with their `emails` arrays.
+To include Nessebar in `/api/site-contacts`, include `"nessebar"` in
+`site_contacts.store_codes`.
+
+Nessebar write fragment:
+
+```json
+{
+  "email": "nesebarg@ssg.bg",
+  "emails": ["nesebarg@ssg.bg", "nesebarm@ssg.bg"]
+}
+```
 
 Policy PUT uses `{request_id,expected_current_version,translations}` with
 exactly BG/EN entries `{locale,title,text,url}`. `url` is the absolute public
@@ -429,7 +543,8 @@ Settings PATCH requires `{request_id,expected_version}` and at least one of
 GET returns the current `version`; stale updates return 409.
 It cannot change currency, purchasing allowlists, prices or `ready`, and
 requires an existing `ShopSettings` row.
-`site_contacts` contains nullable `phone`/`email`, `store_codes` and
+`site_contacts` contains nullable `phone`/`email`, optional `emails` (up to
+five; the first must match `email` when both are supplied), `store_codes` and
 `verified_links` (`label_bg`, `label_en`, `url`).
 `cookie_config` contains `version`, `policy_version`, `necessary_enabled:true`,
 `optional_categories`, `providers` and nullable `persistence_days`.

@@ -230,8 +230,10 @@ model Principal {
   createdAt                          DateTime           @default(now()) @db.Timestamptz(3)
   updatedAt                          DateTime           @updatedAt @db.Timestamptz(3)
   from_MediaRelease_reviewedById     MediaRelease[]     @relation("MediaRelease_reviewedById")
+  from_WebsiteMediaRelease_reviewedById WebsiteMediaRelease[] @relation("WebsiteMediaRelease_reviewedById")
   from_ProductRevision_createdById   ProductRevision[]  @relation("ProductRevision_createdById")
   from_MediaAsset_reviewedById       MediaAsset[]       @relation("MediaAsset_reviewedById")
+  from_WebsiteMediaAsset_reviewedById WebsiteMediaAsset[] @relation("WebsiteMediaAsset_reviewedById")
   from_StockSale_recordedById        StockSale[]        @relation("StockSale_recordedById")
   from_ImportBatch_actorId           ImportBatch[]      @relation("ImportBatch_actorId")
   from_OrderLine_decidedById         OrderLine[]        @relation("OrderLine_decidedById")
@@ -414,6 +416,39 @@ model MediaAsset {
   from_RevisionImage_assetId RevisionImage[] @relation("RevisionImage_assetId")
   from_QuoteLine_assetId     QuoteLine[]     @relation("QuoteLine_assetId")
   from_OrderLine_assetId     OrderLine[]     @relation("OrderLine_assetId")
+
+  @@unique([releaseId, logicalImageId])
+}
+
+model WebsiteMediaRelease {
+  id                            String              @id @default(uuid()) @db.Uuid
+  versionLabel                  String              @unique @db.VarChar(30)
+  approved                      Boolean             @default(false)
+  reviewedById                  String?             @db.Uuid
+  reviewedAt                    DateTime?           @db.Timestamptz(3)
+  receiptSha256                 String?             @db.VarChar(64)
+  createdAt                     DateTime            @default(now()) @db.Timestamptz(3)
+  reviewedByIdRelation          Principal?          @relation("WebsiteMediaRelease_reviewedById", fields: [reviewedById], references: [id], onDelete: Restrict)
+  from_WebsiteMediaAsset_releaseId WebsiteMediaAsset[] @relation("WebsiteMediaAsset_releaseId")
+}
+
+model WebsiteMediaAsset {
+  id                           String               @id @default(uuid()) @db.Uuid
+  releaseId                    String               @db.Uuid
+  logicalImageId               String               @db.VarChar(80)
+  role                         MediaRole
+  originalPrivatePath          String               @db.VarChar(1000)
+  derivatives                  Json
+  altBg                        String               @db.VarChar(500)
+  altEn                        String               @db.VarChar(500)
+  processedWithAi              Boolean              @default(false)
+  onModelIllustrative          Boolean              @default(false)
+  reviewStatus                 ReviewStatus         @default(draft)
+  reviewedById                 String?              @db.Uuid
+  reviewedAt                   DateTime?            @db.Timestamptz(3)
+  createdAt                    DateTime             @default(now()) @db.Timestamptz(3)
+  releaseIdRelation            WebsiteMediaRelease  @relation("WebsiteMediaAsset_releaseId", fields: [releaseId], references: [id], onDelete: Restrict)
+  reviewedByIdRelation         Principal?           @relation("WebsiteMediaAsset_reviewedById", fields: [reviewedById], references: [id], onDelete: Restrict)
 
   @@unique([releaseId, logicalImageId])
 }

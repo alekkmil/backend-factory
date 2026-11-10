@@ -6,30 +6,30 @@ import {
   Logger,
   NotFoundException,
   ServiceUnavailableException,
-} from "@nestjs/common";
-import { ConfigService } from "@nestjs/config";
-import { createHash, randomUUID } from "node:crypto";
-import sharp from "sharp";
-import type {} from "multer";
-import { Prisma } from "../../../generated/prisma/client";
-import { PrismaService } from "../../database/prisma.service";
+} from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
+import { createHash, randomUUID } from 'node:crypto';
+import sharp from 'sharp';
+import type {} from 'multer';
+import { Prisma } from '../../../generated/prisma/client';
+import { PrismaService } from '../../database/prisma.service';
 import {
   hashIdempotencyPayload,
   TransactionService,
-} from "../../common/transactions/transaction.service";
+} from '../../common/transactions/transaction.service';
 import {
   configurationUrl,
   projectMedia,
-} from "../products/product-read.service";
+} from '../products/product-read.service';
 import {
   CatalogueAdminService,
   cloneProductRevisionToDraft,
-} from "./catalogue-admin.service";
+} from './catalogue-admin.service';
 import {
   CatalogueMediaRequestDto,
   CatalogueImageMetadataDto,
-} from "./catalogue-media.dto";
-import { CatalogueMediaStorageService } from "./catalogue-media-storage.service";
+} from './catalogue-media.dto';
+import { MediaStorageService } from '../../common/media-storage.service';
 
 type Derivative = {
   size: number;
@@ -49,7 +49,7 @@ type PreparedImage = {
   derivatives: { metadata: Derivative; buffer: Buffer }[];
 };
 const digest = (buffer: Buffer) =>
-  createHash("sha256").update(buffer).digest("hex");
+  createHash('sha256').update(buffer).digest('hex');
 
 @Injectable()
 export class CatalogueMediaService {
@@ -61,7 +61,7 @@ export class CatalogueMediaService {
     private readonly db: PrismaService,
     private readonly transactions: TransactionService,
     private readonly catalogue: CatalogueAdminService,
-    private readonly storage: CatalogueMediaStorageService,
+    private readonly storage: MediaStorageService,
   ) {}
 
   async attach(
@@ -71,8 +71,8 @@ export class CatalogueMediaService {
     files: Express.Multer.File[],
   ) {
     if (
-      this.config.get<string>("NODE_ENV") === "production" ||
-      !this.config.get<boolean>("DEV_CATALOGUE_PUBLISH_ENABLED")
+      this.config.get<string>('NODE_ENV') === 'production' ||
+      !this.config.get<boolean>('DEV_CATALOGUE_PUBLISH_ENABLED')
     )
       throw new ForbiddenException();
     const byKey = new Map(files.map((file) => [file.fieldname, file]));
@@ -102,10 +102,10 @@ export class CatalogueMediaService {
     if (stored) {
       if (stored.payloadHash !== hashIdempotencyPayload(payload))
         throw new ConflictException({
-          code: "REQUEST_PAYLOAD_MISMATCH",
-          message_key: "errors.request_payload_mismatch",
+          code: 'REQUEST_PAYLOAD_MISMATCH',
+          message_key: 'errors.request_payload_mismatch',
         });
-      if (stored.state === "committed") {
+      if (stored.state === 'committed') {
         const replay = await this.transactions.serializable((tx) =>
           this.transactions.executeIdempotentAction(
             tx,
@@ -115,7 +115,7 @@ export class CatalogueMediaService {
               payload,
             },
             async () => {
-              throw new Error("Completed media action lost its stored result");
+              throw new Error('Completed media action lost its stored result');
             },
           ),
         );
@@ -131,8 +131,8 @@ export class CatalogueMediaService {
       throw new ConflictException();
     if (this.processing)
       throw new ServiceUnavailableException({
-        code: "MEDIA_PROCESSING_BUSY",
-        message_key: "errors.temporary_unavailable",
+        code: 'MEDIA_PROCESSING_BUSY',
+        message_key: 'errors.temporary_unavailable',
       });
     this.processing = true;
     const releaseId = randomUUID();
@@ -146,7 +146,7 @@ export class CatalogueMediaService {
           await this.prepare(productId, releaseId, metadata, file.buffer),
         );
       }
-      const cdn = configurationUrl(this.config, "MEDIA_CDN_BASE_URL", false);
+      const cdn = configurationUrl(this.config, 'MEDIA_CDN_BASE_URL', false);
       for (const image of prepared) {
         await this.storage.put(
           image.originalKey,
@@ -159,7 +159,7 @@ export class CatalogueMediaService {
           await this.storage.put(
             derivative.metadata.object_key,
             derivative.buffer,
-            "image/webp",
+            'image/webp',
             false,
           );
           keys.push(derivative.metadata.object_key);
@@ -181,7 +181,7 @@ export class CatalogueMediaService {
             const draft = await this.draft(tx, productId, actorId);
             const existing = await tx.revisionImage.findMany({
               where: { revisionId: draft.id },
-              orderBy: { sortOrder: "asc" },
+              orderBy: { sortOrder: 'asc' },
               include: { assetIdRelation: true },
             });
             if (
@@ -199,9 +199,9 @@ export class CatalogueMediaService {
             )
               throw new BadRequestException();
             const mains =
-              existing.filter((image) => image.assetIdRelation.role === "main")
+              existing.filter((image) => image.assetIdRelation.role === 'main')
                 .length +
-              input.images.filter((image) => image.role === "main").length;
+              input.images.filter((image) => image.role === 'main').length;
             const first = existing[0]
               ? {
                   role: existing[0].assetIdRelation.role,
@@ -215,7 +215,7 @@ export class CatalogueMediaService {
                     ...input.images.map((image) => image.sort_order),
                   ),
                 };
-            if (mains !== 1 || first.role !== "main" || first.order !== 1)
+            if (mains !== 1 || first.role !== 'main' || first.order !== 1)
               throw new BadRequestException();
             await tx.revisionImage.deleteMany({
               where: { revisionId: draft.id },
@@ -224,7 +224,7 @@ export class CatalogueMediaService {
               data: {
                 id: releaseId,
                 productId,
-                versionLabel: releaseId.replace(/-/g, "").slice(0, 30),
+                versionLabel: releaseId.replace(/-/g, '').slice(0, 30),
               },
             });
             await tx.productRevision.update({
@@ -233,8 +233,8 @@ export class CatalogueMediaService {
             });
             for (const image of existing) {
               const asset = image.assetIdRelation;
-              projectMedia(asset, "bg", cdn, draft.mediaReleaseId);
-              projectMedia(asset, "en", cdn, draft.mediaReleaseId);
+              projectMedia(asset, 'bg', cdn, draft.mediaReleaseId);
+              projectMedia(asset, 'en', cdn, draft.mediaReleaseId);
               const copy = await tx.mediaAsset.create({
                 data: {
                   releaseId,
@@ -246,7 +246,7 @@ export class CatalogueMediaService {
                   altEn: asset.altEn,
                   processedWithAi: asset.processedWithAi,
                   onModelIllustrative: asset.onModelIllustrative,
-                  reviewStatus: "approved",
+                  reviewStatus: 'approved',
                 },
               });
               await tx.revisionImage.create({
@@ -276,10 +276,10 @@ export class CatalogueMediaService {
                   altEn: image.metadata.alt_en,
                   processedWithAi: image.metadata.processed_with_ai,
                   onModelIllustrative: image.metadata.on_model_illustrative,
-                  reviewStatus: "approved",
+                  reviewStatus: 'approved',
                 },
               });
-              for (const locale of ["bg", "en"] as const)
+              for (const locale of ['bg', 'en'] as const)
                 projectMedia(asset, locale, cdn, releaseId);
               await tx.revisionImage.create({
                 data: {
@@ -300,15 +300,15 @@ export class CatalogueMediaService {
             await tx.auditEvent.create({
               data: {
                 actorId,
-                action: "catalogue_media_attach",
-                subjectType: "Product",
+                action: 'catalogue_media_attach',
+                subjectType: 'Product',
                 subjectId: productId,
                 eventKey: `catalogue-media:${releaseId}`,
                 after: {
                   release_id: releaseId,
                   draft_revision_id: draft.id,
                   source_bytes_processed: true,
-                  approval: "development_only",
+                  approval: 'development_only',
                 },
               },
             });
@@ -365,56 +365,56 @@ export class CatalogueMediaService {
     try {
       info = await sharp(original, {
         limitInputPixels: 40000000,
-        failOn: "warning",
+        failOn: 'warning',
       }).metadata();
     } catch {
       throw new BadRequestException({
-        code: "INVALID_IMAGE",
-        message_key: "errors.validation",
+        code: 'INVALID_IMAGE',
+        message_key: 'errors.validation',
       });
     }
     if (
       !info.width ||
       !info.height ||
       (info.pages ?? 1) !== 1 ||
-      !["jpeg", "png", "webp"].includes(info.format ?? "") ||
+      !['jpeg', 'png', 'webp'].includes(info.format ?? '') ||
       Math.max(info.width, info.height) < 1600
     )
       throw new BadRequestException({
-        code: "INVALID_IMAGE",
-        message_key: "errors.validation",
+        code: 'INVALID_IMAGE',
+        message_key: 'errors.validation',
       });
-    const derivatives: PreparedImage["derivatives"] = [];
+    const derivatives: PreparedImage['derivatives'] = [];
     for (const size of [200, 400, 800, 1600]) {
       let buffer: Buffer;
       try {
         buffer = await sharp(original, {
           limitInputPixels: 40000000,
-          failOn: "warning",
+          failOn: 'warning',
         })
           .rotate()
-          .flatten({ background: "#ffffff" })
-          .toColourspace("srgb")
+          .flatten({ background: '#ffffff' })
+          .toColourspace('srgb')
           .resize(size, size, {
-            fit: "contain",
-            background: "#ffffff",
+            fit: 'contain',
+            background: '#ffffff',
             withoutEnlargement: true,
           })
           .webp({ quality: 85 })
           .toBuffer();
       } catch {
         throw new BadRequestException({
-          code: "INVALID_IMAGE",
-          message_key: "errors.validation",
+          code: 'INVALID_IMAGE',
+          message_key: 'errors.validation',
         });
       }
       const output = await sharp(buffer).metadata();
       if (
         output.width !== size ||
         output.height !== size ||
-        output.format !== "webp"
+        output.format !== 'webp'
       )
-        throw new Error("Invalid generated derivative dimensions");
+        throw new Error('Invalid generated derivative dimensions');
       derivatives.push({
         buffer,
         metadata: {
@@ -422,8 +422,8 @@ export class CatalogueMediaService {
           width: size,
           height: size,
           object_key: `products/${productId}/${releaseId}/${metadata.client_key}-${size}.webp`,
-          mime: "image/webp",
-          colour_space: "sRGB",
+          mime: 'image/webp',
+          colour_space: 'sRGB',
           bytes: buffer.length,
           sha256: digest(buffer),
         },
@@ -444,7 +444,7 @@ export class CatalogueMediaService {
     actorId: string,
   ) {
     const draft = await tx.productRevision.findFirst({
-      where: { productId, state: "draft" },
+      where: { productId, state: 'draft' },
     });
     if (draft) return draft;
     const product = await tx.product.findUniqueOrThrow({

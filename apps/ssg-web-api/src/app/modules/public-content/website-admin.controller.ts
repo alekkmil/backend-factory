@@ -1,24 +1,75 @@
 import {
-  Body, Controller, Get, HttpCode, Param, Patch, Put, Query, Req,
-  UnauthorizedException, UseGuards,
+  Body,
+  Controller,
+  Get,
+  HttpCode,
+  Param,
+  Patch,
+  Post,
+  Put,
+  Query,
+  Req,
+  UnauthorizedException,
+  UploadedFiles,
+  UseGuards,
+  UseInterceptors,
 } from '@nestjs/common';
+import { AnyFilesInterceptor } from '@nestjs/platform-express';
 import { StaffTokenGuard } from '../../common/guards/staff-token.guard';
 import type { StaffAuthenticatedRequest } from '../../common/guards/staff-token.guard';
 import { CatalogueEmptyQueryPipe } from '../catalogue-admin/catalogue-empty-query.pipe';
 import { CatalogueDetailQueryDto } from '../catalogue-admin/catalogue-admin.dto';
 import {
-  WebsiteContentDto, WebsiteKeyDto, WebsitePolicyDto, WebsitePolicyPathDto,
-  WebsiteSettingsDto, WebsiteStoreDto, WebsiteStorePathDto,
+  WebsiteContentDto,
+  WebsiteKeyDto,
+  WebsitePolicyDto,
+  WebsitePolicyPathDto,
+  WebsiteSettingsDto,
+  WebsiteStoreDto,
+  WebsiteStorePathDto,
 } from './website-admin.dto';
 import { WebsiteAdminService } from './website-admin.service';
+import { WebsiteMediaMultipartDto } from './website-media.dto';
+import { WebsiteMediaService } from './website-media.service';
 
 @Controller('admin/website')
 @UseGuards(StaffTokenGuard)
 export class WebsiteAdminController {
-  constructor(private readonly website: WebsiteAdminService) {}
+  constructor(
+    private readonly website: WebsiteAdminService,
+    private readonly media: WebsiteMediaService,
+  ) {}
+
+  @Post('media')
+  @HttpCode(200)
+  @UseInterceptors(
+    AnyFilesInterceptor({
+      limits: {
+        files: 5,
+        fileSize: 10 * 1024 * 1024,
+        fields: 1,
+        fieldSize: 65536,
+        parts: 6,
+      },
+    }),
+  )
+  uploadMedia(
+    @Body() input: WebsiteMediaMultipartDto,
+    @UploadedFiles() files: Express.Multer.File[],
+    @Req() request: StaffAuthenticatedRequest,
+    @Query(CatalogueEmptyQueryPipe) query: CatalogueDetailQueryDto,
+  ) {
+    void query;
+    const actorId = request.staffAuth?.principalId;
+    if (!actorId) throw new UnauthorizedException();
+    return this.media.upload(actorId, input.metadata, files ?? []);
+  }
 
   @Get('content/:key')
-  content(@Param() path: WebsiteKeyDto, @Query(CatalogueEmptyQueryPipe) query: CatalogueDetailQueryDto) {
+  content(
+    @Param() path: WebsiteKeyDto,
+    @Query(CatalogueEmptyQueryPipe) query: CatalogueDetailQueryDto,
+  ) {
     void query;
     return this.website.content(path.key);
   }
@@ -36,7 +87,10 @@ export class WebsiteAdminController {
   }
 
   @Get('stores/:code')
-  store(@Param() path: WebsiteStorePathDto, @Query(CatalogueEmptyQueryPipe) query: CatalogueDetailQueryDto) {
+  store(
+    @Param() path: WebsiteStorePathDto,
+    @Query(CatalogueEmptyQueryPipe) query: CatalogueDetailQueryDto,
+  ) {
     void query;
     return this.website.store(path.code);
   }
@@ -44,7 +98,8 @@ export class WebsiteAdminController {
   @Put('stores/:code')
   @HttpCode(200)
   saveStore(
-    @Param() path: WebsiteStorePathDto, @Body() body: WebsiteStoreDto,
+    @Param() path: WebsiteStorePathDto,
+    @Body() body: WebsiteStoreDto,
     @Req() request: StaffAuthenticatedRequest,
     @Query(CatalogueEmptyQueryPipe) query: CatalogueDetailQueryDto,
   ) {
@@ -53,7 +108,10 @@ export class WebsiteAdminController {
   }
 
   @Get('policies/:kind/:version')
-  policy(@Param() path: WebsitePolicyPathDto, @Query(CatalogueEmptyQueryPipe) query: CatalogueDetailQueryDto) {
+  policy(
+    @Param() path: WebsitePolicyPathDto,
+    @Query(CatalogueEmptyQueryPipe) query: CatalogueDetailQueryDto,
+  ) {
     void query;
     return this.website.policy(path.kind, path.version);
   }
@@ -61,12 +119,18 @@ export class WebsiteAdminController {
   @Put('policies/:kind/:version')
   @HttpCode(200)
   savePolicy(
-    @Param() path: WebsitePolicyPathDto, @Body() body: WebsitePolicyDto,
+    @Param() path: WebsitePolicyPathDto,
+    @Body() body: WebsitePolicyDto,
     @Req() request: StaffAuthenticatedRequest,
     @Query(CatalogueEmptyQueryPipe) query: CatalogueDetailQueryDto,
   ) {
     void query;
-    return this.website.savePolicy(this.actor(request), path.kind, path.version, body);
+    return this.website.savePolicy(
+      this.actor(request),
+      path.kind,
+      path.version,
+      body,
+    );
   }
 
   @Get('settings')
@@ -77,7 +141,8 @@ export class WebsiteAdminController {
 
   @Patch('settings')
   saveSettings(
-    @Body() body: WebsiteSettingsDto, @Req() request: StaffAuthenticatedRequest,
+    @Body() body: WebsiteSettingsDto,
+    @Req() request: StaffAuthenticatedRequest,
     @Query(CatalogueEmptyQueryPipe) query: CatalogueDetailQueryDto,
   ) {
     void query;
