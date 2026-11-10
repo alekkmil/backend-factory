@@ -784,7 +784,7 @@
               "formdata": [
                 {
                   "key": "metadata",
-                  "value": "{\"request_id\":\"{{websiteMediaRequestId}}\",\"images\":[{\"client_key\":\"hero\",\"alt_bg\":\"REPLACE_WITH_APPROVED_ALT_BG\",\"alt_en\":\"REPLACE_WITH_APPROVED_ALT_EN\",\"processed_with_ai\":false}]}",
+                  "value": "{\"request_id\":\"{{websiteMediaRequestId}}\",\"images\":[{\"client_key\":\"hero\",\"alt_bg\":\"REPLACE_WITH_APPROVED_ALT_BG\",\"alt_en\":\"REPLACE_WITH_APPROVED_ALT_EN\",\"processed_with_ai\":false,\"on_model_illustrative\":false}]}",
                   "type": "text"
                 },
                 {
@@ -795,7 +795,7 @@
               ]
             },
             "url": "{{baseUrl}}/api/admin/website/media",
-            "description": "Select an image file for image_hero. Supports 1-5 JPEG/PNG/WebP files up to 10 MiB each, with a 1600px minimum long edge. Include one metadata image item and matching image_<client_key> file per asset. Requires DEV_CATALOGUE_PUBLISH_ENABLED=true as well as staff auth. Returns approved media IDs and BG/EN public variants; add the returned UUID to image sections, link_cards items, or store media_ids. Upload does not publish or edit a page/store."
+            "description": "Select an image file for image_hero. Supports 1-5 JPEG/PNG/WebP files up to 10 MiB each, with a 1600px minimum long edge. nginx must allow 51 MiB including multipart overhead (see tools/deploy/ssg-web-api-nginx-uploads.conf). Include one metadata image item and matching image_<client_key> file per asset. For AI model composites set processed_with_ai and on_model_illustrative to true. Approved metadata is immutable: re-upload with a new request ID to correct flags, then replace references with the new UUIDs. Requires DEV_CATALOGUE_PUBLISH_ENABLED=true as well as staff auth. Returns approved media IDs and BG/EN public variants; add the returned UUID to image sections, link_cards items, or store media_ids. Upload does not publish or edit a page/store."
           },
           "response": []
         },
@@ -809,6 +809,76 @@
               { "key": "X-CSRF-Token", "value": "{{devStaffCsrfToken}}" }
             ],
             "url": "{{baseUrl}}/api/admin/website/content/{{websiteContentKey}}"
+          },
+          "response": []
+        },
+        {
+          "name": "Preserve HOME and add catalogue links (optional hero slides)",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const get = key => pm.variables.get(key);",
+                  "const stop = message => { pm.execution.skipRequest(); throw new Error(message); };",
+                  "const first = get('heroMediaId1');",
+                  "const second = get('heroMediaId2');",
+                  "if (Boolean(first) !== Boolean(second)) stop('Set both heroMediaId1 and heroMediaId2, or leave both empty.');",
+                  "pm.sendRequest({",
+                  "  url: get('baseUrl') + '/api/admin/website/content/home',",
+                  "  method: 'GET',",
+                  "  header: { Origin: get('frontendOrigin'), 'X-Dev-Staff-Token': get('devStaffAuthToken'), 'X-CSRF-Token': get('devStaffCsrfToken') }",
+                  "}, (error, response) => {",
+                  "  if (error || response.code !== 200) return stop('Cannot fetch current HOME; no write was sent.');",
+                  "  const home = response.json();",
+                  "  if (home.type !== 'home' || !home.updated_at || home.translations.length !== 2 || !Array.isArray(home.links)) return stop('Unexpected HOME response.');",
+                  "  const payload = { request_id: pm.variables.replaceIn('{{$guid}}'), expected_updated_at: home.updated_at, type: home.type, parent_id: home.parent_id, author_id: home.author_id, special_data: home.special_data, translations: home.translations, links: home.links };",
+                  "  const categories = [",
+                  "    ['R003', 'Пръстени', 'Rings'],",
+                  "    ['R004', 'Колиета и медальони', 'Necklaces and pendants'],",
+                  "    ['R005', 'Обеци', 'Earrings'],",
+                  "    ['R006', 'Гривни', 'Bracelets'],",
+                  "    ['R007', 'Брошки', 'Brooches'],",
+                  "    ['R002', 'Всички бижута', 'All jewellery']",
+                  "  ];",
+                  "  let order = Math.max(0, ...payload.links.filter(link => link.slot === 'categories').map(link => link.sort_order));",
+                  "  for (const [route_id, label_bg, label_en] of categories) {",
+                  "    if (!payload.links.some(link => link.slot === 'categories' && link.target.kind === 'route' && link.target.route_id === route_id)) {",
+                  "      payload.links.push({ slot: 'categories', sort_order: ++order, target: { kind: 'route', route_id }, label_bg, label_en });",
+                  "    }",
+                  "  }",
+                  "  if (first && second) {",
+                  "    const slides = {};",
+                  "    for (const locale of ['bg', 'en']) {",
+                  "      const translation = home.translations.find(item => item.locale === locale);",
+                  "      const copy = translation?.sections[0];",
+                  "      if (copy?.kind !== 'text') return stop('Expected existing hero text at source block 0.');",
+                  "      slides[locale] = [first, second].map(media_id => ({ media_id, heading: copy.heading, text: copy.text, cta: { label: locale === 'bg' ? 'Всички бижута' : 'All jewellery', target: { kind: 'route', route_id: 'R002' } } }));",
+                  "    }",
+                  "    payload.special_data = { ...payload.special_data, hero_slides: slides };",
+                  "  }",
+                  "  pm.variables.set('websiteHomePayload', JSON.stringify(payload));",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PUT",
+            "header": [
+              { "key": "Origin", "value": "{{frontendOrigin}}" },
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "X-Dev-Staff-Token", "value": "{{devStaffAuthToken}}" },
+              { "key": "X-CSRF-Token", "value": "{{devStaffCsrfToken}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{{websiteHomePayload}}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": "{{baseUrl}}/api/admin/website/content/home",
+            "description": "UPDATE, NOT CREATE. Pre-request script fetches fresh HOME with staff auth, preserves every existing link and translation/source block, uses updated_at and a new UUID, then appends missing category links R003-R007/R002. Source blocks are not reordered. Optional heroMediaId1 and heroMediaId2 variables add/replace special_data.hero_slides in both locales, reusing current hero copy and a catalogue CTA. Existing hero_slides are preserved when both variables are empty. Use correctly flagged approved media IDs; illustrative composites need on_model_illustrative:true at upload. Review these intended additions before sending. On 400, inspect details.field/cause_code/locale/route_id; on 409 rerun to fetch fresh data."
           },
           "response": []
         },

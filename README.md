@@ -83,6 +83,25 @@ One-time server setup (Ubuntu Lightsail with a static public IP):
    from your deployment runner (use a fixed-egress runner if strict IP allowlisting
    is required).
 
+   For nginx, include [the SSG upload limit snippet](tools/deploy/ssg-web-api-nginx-uploads.conf)
+   inside this application's existing `server` block. It sets
+   `client_max_body_size 51m`: five 10 MiB files plus up to 64 KiB metadata and
+   multipart overhead. Remove any smaller override in the matching upload
+   `location`; nginx uses the most specific setting. Do not change other sites.
+   The proxy is server-managed; application deployment does not install this
+   snippet automatically. The deployment package includes a copy; after
+   deploying, run on the server:
+
+   ```sh
+   sudo install -m 644 /srv/ssg-web-api/current/ssg-web-api-nginx-uploads.conf /etc/nginx/snippets/ssg-web-api-uploads.conf
+   # Add inside the existing SSG server block:
+   # include /etc/nginx/snippets/ssg-web-api-uploads.conf;
+   sudo nginx -t && sudo systemctl reload nginx
+   ```
+
+   An nginx HTML 413 means the request was rejected before NestJS/authentication;
+   application file/count limits still apply after increasing the proxy limit.
+
 Create the GitHub **Environment** `ssg-web-api-dev`, restrict its deployment
 branches to `dev`, and add these **environment secrets**:
 
@@ -289,6 +308,63 @@ HOME `primary_image` is null in `/api/content/:id`; a category image must not be
 mistaken for a hero image. `/api/home` provides the mapped content directly, so
 no second HOME detail request is needed.
 
+HOME also accepts optional localized `special_data.hero_slides`, independent of
+the eight existing translation blocks. `/api/home` exposes the chosen locale's
+slides as `sections.find(section => section.key === "hero").slides`; absent
+configuration returns `[]`. Existing `content_blocks` and all links are retained.
+The frontend should render configured slides as the carousel; block 0 remains
+available as shared/fallback copy, not an additional slide.
+
+To attach two slides, add this property to the **existing** `special_data`
+object of a fresh full-preservation HOME PUT (keep `kind` and `section_keys`).
+Replace the copy with approved text or copy the existing block 0's `heading`
+and `text`; no translation block needs to be inserted, removed or reordered:
+
+```json
+{
+  "hero_slides": {
+    "bg": [
+      {
+        "media_id": "a5949919-4673-42fc-a88e-27bf4605c19a",
+        "heading": "<approved Bulgarian slide 1 heading>",
+        "text": "<approved Bulgarian slide 1 text>",
+        "cta": { "label": "Всички бижута", "target": { "kind": "route", "route_id": "R002" } }
+      },
+      {
+        "media_id": "ebca9a0a-6ea5-4640-8791-8ce3cace9be0",
+        "heading": "<approved Bulgarian slide 2 heading>",
+        "text": "<approved Bulgarian slide 2 text>",
+        "cta": { "label": "Пръстени", "target": { "kind": "route", "route_id": "R003" } }
+      }
+    ],
+    "en": [
+      {
+        "media_id": "a5949919-4673-42fc-a88e-27bf4605c19a",
+        "heading": "<approved English slide 1 heading>",
+        "text": "<approved English slide 1 text>",
+        "cta": { "label": "All jewellery", "target": { "kind": "route", "route_id": "R002" } }
+      },
+      {
+        "media_id": "ebca9a0a-6ea5-4640-8791-8ce3cace9be0",
+        "heading": "<approved English slide 2 heading>",
+        "text": "<approved English slide 2 text>",
+        "cta": { "label": "Rings", "target": { "kind": "route", "route_id": "R003" } }
+      }
+    ]
+  }
+}
+```
+
+Both locale arrays are required, must have equal lengths, and allow 0-10 slides.
+Each slide requires an approved media UUID and `heading`, `text`, `cta`;
+the last three can be null. Heading/text limits are 255/3000 characters.
+A non-null CTA requires `label` and a supported `target`; public output resolves
+it to `{label,url}`. Public slides return `{media,heading,text,cta}`, with localized
+alt text, responsive URLs and disclosure flags inside `media`.
+The UUIDs above are the existing uploaded assets, whose illustrative flag is
+false. If they depict illustrative model composites, re-upload with the new
+flag below and substitute the newly returned UUIDs before attaching them.
+
 For example, `hero.content_blocks` contains the first localized HOME section;
 `categories.content_blocks` contains the category copy and image blocks:
 
@@ -375,6 +451,22 @@ privately, and returns an approved `media.id` plus BG/EN public variants.
 Publishing the media makes the assets usable, but does not publish a page or
 store; reference the returned UUID in a published content section or store.
 Use a new request ID for new bytes/metadata; approved media is immutable.
+An optional per-image boolean `on_model_illustrative` defaults to false;
+set it to true for illustrative model composites. `processed_with_ai: true`
+sets `ai_disclosure_required: true`, independently of the illustrative flag.
+Existing approved assets cannot be patched: re-upload their original files
+with a new `request_id` and the correct flags, then replace their references.
+For example:
+
+```json
+{
+  "client_key": "hero",
+  "alt_bg": "<approved Bulgarian alt text>",
+  "alt_en": "<approved English alt text>",
+  "processed_with_ai": true,
+  "on_model_illustrative": true
+}
+```
 
 Examples of references:
 
@@ -412,6 +504,19 @@ PUT replaces the entire editable record, including both BG/EN translations and
 the complete ordered link array. Omitted links are removed, not merged.
 GET output includes read-only fields: do not send `id`, `updated_at`, or
 `replayed` back in a PUT.
+Website source-validation failures return safe `details` including `field`
+and `cause_code`, plus `locale`/`route_id` when available. For example a missing
+category target can identify `links[33]`, locale `bg`, route `R003`, cause
+`LINK_TARGET_UNAVAILABLE`. Section errors identify the translation/section
+index; no content bodies, tokens, database errors or stack traces are returned.
+
+The Postman request **Preserve HOME and add catalogue links (optional hero
+slides)** fetches current HOME immediately before writing, constructs only the
+editable fields, preserves both translations/all source blocks/all existing
+links, and appends any missing R003-R007/R002 category links. It uses the fresh
+timestamp and a new UUID. Optional environment variables `heroMediaId1` and
+`heroMediaId2` add two localized slides using existing hero copy; both must be
+set together. Review the intended additions before executing it.
 
 Homepage example (`PUT /api/admin/website/content/home`):
 
@@ -537,6 +642,13 @@ new version label. Matching text on an existing version can be upserted.
 When replacing the current cookies policy, an existing configured
 `cookie_config.policy_version` is advanced atomically and the settings version
 increases; both language policy versions are created together.
+Public policy URLs (including HOME/FAQ links, cookie configuration and SEO
+alternates) use `PUBLIC_SITE_ORIGIN` and the registered path for that policy
+kind/locale. A stored historical HTTP(S) origin does not require changing
+immutable policy text or accepted versions. The stored path must still match
+the registered policy route; malformed URLs, credentials, query strings,
+fragments and wrong kind/locale paths are rejected. New policy writes still
+require the current configured origin.
 
 Settings PATCH requires `{request_id,expected_version}` and at least one of
 `site_contacts`, `cookie_config`, `coordinator_email` (nullable).

@@ -82,6 +82,7 @@ jobs:
           mkdir -p "$staging"
           cp -a "dist/apps/$APP/." "$staging/"
           cp tools/deploy/ecosystem.config.cjs "$staging/"
+          cp tools/deploy/ssg-web-api-nginx-uploads.conf "$staging/"
           mkdir "$staging/migration"
           cp -a "apps/$APP/prisma" "apps/$APP/prisma.config.ts" "$staging/migration/"
           node - "$staging/migration/package.json" <<'NODE'
