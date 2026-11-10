@@ -187,6 +187,7 @@ export class WebsiteMediaService {
                   altBg: image.input.alt_bg.trim().normalize('NFC'),
                   altEn: image.input.alt_en.trim().normalize('NFC'),
                   processedWithAi: image.input.processed_with_ai,
+                  onModelIllustrative: image.input.on_model_illustrative ?? false,
                   reviewStatus: 'approved',
                   reviewedById: actorId,
                   reviewedAt,

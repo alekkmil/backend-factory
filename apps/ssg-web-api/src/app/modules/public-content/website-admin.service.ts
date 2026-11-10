@@ -30,8 +30,8 @@ function jsonObject(input: unknown): Prisma.InputJsonObject {
   return value;
 }
 
-function invalid(code = 'WEBSITE_CONTENT_INVALID'): never {
-  throw new BadRequestException({ code, message_key: 'errors.validation' });
+function invalid(code = 'WEBSITE_CONTENT_INVALID', details?: Record<string, string>): never {
+  throw new BadRequestException({ code, message_key: 'errors.validation', ...(details ? { details } : {}) });
 }
 
 function conflict(code = 'VERSION_CONFLICT'): never {
@@ -167,12 +167,13 @@ export class WebsiteAdminService {
         });
       }
       await this.validate(() => this.publicContent.validateContent(tx, input));
-      for (const link of input.links) {
+      for (const [index, link] of input.links.entries()) {
         for (const translation of input.translations) {
           await this.validate(() => this.publicContent.validateLink(
             tx, link.target, translation.locale === 'bg' ? link.label_bg : link.label_en,
             translation.locale,
-          ));
+          ), `links[${index}]`, translation.locale,
+          typeof link.target.route_id === 'string' ? link.target.route_id : undefined);
         }
       }
       await tx.contentLink.deleteMany({ where: { ownerContentId: record.id } });
@@ -184,7 +185,8 @@ export class WebsiteAdminService {
       }
       if (input.type === 'home') {
         for (const translation of input.translations.filter(item => item.published)) {
-          await this.validate(() => this.publicContent.homeInTransaction(tx, translation.locale));
+          await this.validate(() => this.publicContent.homeInTransaction(tx, translation.locale),
+            'home_projection', translation.locale);
         }
       }
       return this.readContent(tx, key);
@@ -218,7 +220,7 @@ export class WebsiteAdminService {
       }
       const now = new Date();
       for (const translation of input.translations) {
-        await this.validate(async () => this.publicContent.validatePolicy(translation));
+        await this.validate(async () => this.publicContent.validatePolicy(translation, kind));
         const url = new URL(translation.url);
         let path: string;
         try {
@@ -370,7 +372,9 @@ export class WebsiteAdminService {
     return invalid('LINK_TARGET_INVALID');
   }
 
-  private async validate(work: () => Promise<unknown>): Promise<void> {
+  private async validate(
+    work: () => Promise<unknown>, field = 'content', locale?: Locale, routeId?: string,
+  ): Promise<void> {
     try {
       await work();
     } catch (error) {
@@ -378,8 +382,16 @@ export class WebsiteAdminService {
         const response = error.getResponse();
         if (typeof response === 'object' && 'code' in response &&
             ['CONFIGURATION_UNAVAILABLE', 'MEDIA_NOT_READY', 'ROUTE_CONFLICT', 'LINK_TARGET_UNAVAILABLE'].includes(String(response.code))) {
-          this.logger.warn(`Website write rejected: ${String(response.code)}`);
-          invalid(response.code === 'LINK_TARGET_UNAVAILABLE' ? response.code : 'WEBSITE_CONTENT_INVALID');
+          const source = 'details' in response ? response.details : null;
+          const sourceField = source && typeof source === 'object' &&
+            'field' in source && typeof source.field === 'string' ? source.field : field;
+          this.logger.warn(`Website write rejected: ${String(response.code)} at ${sourceField}`);
+          invalid(response.code === 'LINK_TARGET_UNAVAILABLE' ? response.code : 'WEBSITE_CONTENT_INVALID', {
+            field: sourceField,
+            cause_code: String(response.code),
+            ...(locale ? { locale } : {}),
+            ...(routeId ? { route_id: routeId } : {}),
+          });
         }
       }
       throw error;

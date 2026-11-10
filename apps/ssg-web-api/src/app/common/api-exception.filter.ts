@@ -13,6 +13,7 @@ interface ApiErrorResponse {
   code: string;
   message_key: string;
   correlation_id: string;
+  details?: Record<string, string>;
 }
 
 @Catch()
@@ -66,6 +67,17 @@ export class ApiExceptionFilter implements ExceptionFilter {
           : this.messageKey(status),
       correlation_id: correlationId,
     };
+    const details = customBody?.get('details');
+    if (status === HttpStatus.BAD_REQUEST &&
+        ['WEBSITE_CONTENT_INVALID', 'LINK_TARGET_UNAVAILABLE'].includes(body.code) &&
+        details && typeof details === 'object' && !Array.isArray(details)) {
+      body.details = {};
+      for (const [key, value] of Object.entries(details)) {
+        if (['field', 'cause_code', 'locale', 'route_id'].includes(key) && typeof value === 'string') {
+          body.details[key] = value;
+        }
+      }
+    }
     response.status(status).json(body);
   }
 

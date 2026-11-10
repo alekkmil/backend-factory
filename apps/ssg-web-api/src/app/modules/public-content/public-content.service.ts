@@ -31,6 +31,14 @@ import type {
 type JsonRecord = Prisma.JsonObject;
 type ReadTransaction = Prisma.TransactionClient;
 
+const POLICY_ROUTES: Record<PolicyKind, string> = {
+  delivery_returns: 'R070',
+  terms: 'R071',
+  privacy: 'R072',
+  cookies: 'R073',
+  accessibility: 'R074',
+};
+
 const HOME_SECTIONS = [
   'hero',
   'categories',
@@ -97,12 +105,20 @@ function isRecord(value: Prisma.JsonValue | undefined): value is JsonRecord {
 function unavailable(
   code = 'CONFIGURATION_UNAVAILABLE',
   messageKey = 'errors.configuration_unavailable',
+  details?: { field: string },
 ): never {
-  throw new ServiceUnavailableException({ code, message_key: messageKey });
+  throw new ServiceUnavailableException({
+    code, message_key: messageKey, ...(details ? { details } : {}),
+  });
 }
 
 function assertKeys(value: JsonRecord, allowed: readonly string[]): void {
-  if (Object.keys(value).some((key) => !allowed.includes(key))) unavailable();
+  const unexpected = Object.keys(value).find((key) => !allowed.includes(key));
+  if (unexpected) {
+    unavailable('CONFIGURATION_UNAVAILABLE', 'errors.configuration_unavailable', {
+      field: unexpected,
+    });
+  }
 }
 
 function requiredString(
@@ -397,7 +413,7 @@ export class PublicContentService {
     if (homeRecords.length === 0) throw new NotFoundException();
     if (homeRecords.length !== 1) unavailable();
     const special = recordValue(homeRecords[0].specialData);
-    assertKeys(special, ['kind', 'section_keys']);
+    assertKeys(special, ['kind', 'section_keys', 'hero_slides']);
     if (special.kind !== 'home') unavailable();
     const keys = arrayValue(special.section_keys, 11);
     if (
@@ -418,6 +434,9 @@ export class PublicContentService {
       ['consultation_stores', homeBlocks.slice(1, 2)],
       ['categories', homeBlocks.slice(2)],
     ]);
+    const heroSlides = await this.projectHeroSlides(
+      transaction, special.hero_slides, locale,
+    );
 
     const links = await transaction.contentLink.findMany({
       where: { ownerContentId: homeRecords[0].id },
@@ -440,7 +459,8 @@ export class PublicContentService {
       const productItems: ProductSummary[] = [];
       const storeItems: StoreDto[] = [];
       const resolved: ResolvedLink[] = [];
-      for (const link of links.filter((item) => item.slot === key)) {
+      for (const [linkIndex, link] of links.entries()) {
+        if (link.slot !== key) continue;
         const label = locale === 'bg' ? link.labelBg : link.labelEn;
         if (link.targetContentId) {
           const record = await transaction.contentRecord.findFirst({
@@ -456,16 +476,18 @@ export class PublicContentService {
             select: { id: true },
           });
           if (!record) continue;
-          const detail = await this.contentDetailInTransaction(
-            transaction,
-            record.id,
-            locale,
+          const detail = await this.atField(
+            `links[${linkIndex}].target`,
+            () => this.contentDetailInTransaction(transaction, record.id, locale),
           );
           contentRecords.push(detail);
           if (label) resolved.push({ label, url: detail.url });
           continue;
         }
-        const result = await this.resolveStoredLink(transaction, link, locale);
+        const result = await this.atField(
+          `links[${linkIndex}].target`,
+          () => this.resolveStoredLink(transaction, link, locale),
+        );
         if (!result) continue;
         if (result.kind === 'content') contentRecords.push(result.value);
         if (result.kind === 'product') productItems.push(result.value);
@@ -485,6 +507,7 @@ export class PublicContentService {
         key,
         content: null,
         content_blocks: contentBlocks.get(key) ?? [],
+        ...(key === 'hero' ? { slides: heroSlides } : {}),
         products: productItems,
         records: contentRecords,
         stores: storeItems,
@@ -611,7 +634,7 @@ export class PublicContentService {
         locale: row.locale,
         title: row.title,
         text: row.body,
-        url: this.policyUrl(row.url),
+        url: this.policyUrl(row.url, row.kind, row.locale),
         published_at: dateIso(row.verifiedPublishedAt),
       };
     });
@@ -703,7 +726,7 @@ export class PublicContentService {
     if (!policy) unavailable();
     return {
       version,
-      policy_url: this.policyUrl(policy.url),
+      policy_url: this.policyUrl(policy.url, 'cookies', locale),
       necessary_enabled: true as const,
       optional_categories: [
         ...new Set(providers.map((provider) => provider.category)),
@@ -807,11 +830,13 @@ export class PublicContentService {
             select: { locale: true, url: true },
           });
           items.push({
-            url: this.policyUrl(entry.policy.url),
+            url: this.policyUrl(
+              entry.policy.url, entry.policy.kind, entry.policy.locale,
+            ),
             locale: entry.policy.locale,
             alternates: {
-              bg: this.alternatePolicyUrl(alternates, 'bg'),
-              en: this.alternatePolicyUrl(alternates, 'en'),
+              bg: this.alternatePolicyUrl(alternates, entry.policy.kind, 'bg'),
+              en: this.alternatePolicyUrl(alternates, entry.policy.kind, 'en'),
             },
             lastmod: dateIso(entry.policy.verifiedPublishedAt),
           });
@@ -1239,24 +1264,30 @@ export class PublicContentService {
     },
   ): Promise<void> {
     this.siteOrigin();
-    for (const translation of input.translations) {
-      requiredString(translation.title, 250);
-      nullableString(translation.intro, 3000);
-      nullableString(translation.seo_title, 250);
-      nullableString(translation.seo_description, 1000);
-      await this.projectSpecial(
-        transaction,
-        input.type,
-        input.special_data,
-        input.author_id,
-        translation.locale,
+    for (const [index, translation] of input.translations.entries()) {
+      for (const [field, maximum] of [
+        ['title', 250],
+        ['intro', 3000],
+        ['seo_title', 250],
+        ['seo_description', 1000],
+      ] as const) {
+        await this.atField(`translations[${index}].${field}`, async () => {
+          if (field === 'title') requiredString(translation[field], maximum);
+          else nullableString(translation[field], maximum);
+        });
+      }
+      await this.atField('special_data', () =>
+        this.projectSpecial(
+          transaction, input.type, input.special_data, input.author_id,
+          translation.locale,
+        ),
       );
-      await this.projectSections(
-        transaction,
-        translation.sections,
-        translation.locale,
-        true,
-      );
+      for (const [sectionIndex, section] of translation.sections.entries()) {
+        await this.atField(
+          `translations[${index}].sections[${sectionIndex}]`,
+          () => this.projectSections(transaction, [section], translation.locale, true),
+        );
+      }
     }
   }
 
@@ -1277,15 +1308,81 @@ export class PublicContentService {
     if (!resolved) unavailable('LINK_TARGET_UNAVAILABLE', 'errors.validation');
   }
 
-  validatePolicy(input: { title: string; text: string; url: string }): void {
+  validatePolicy(
+    input: { title: string; text: string; url: string; locale: Locale },
+    kind: PolicyKind,
+  ): void {
     this.siteOrigin();
     requiredString(input.title, 250);
     requiredString(input.text, 100000);
-    this.policyUrl(input.url);
+    this.policyUrl(input.url, kind, input.locale, true);
   }
 
   assertWebsiteConfiguration(): void {
     this.siteOrigin();
+  }
+
+  private async atField<T>(field: string, work: () => Promise<T>): Promise<T> {
+    try {
+      return await work();
+    } catch (error) {
+      if (error instanceof ServiceUnavailableException) {
+        const response = error.getResponse();
+        if (typeof response === 'object') {
+          const nested = 'details' in response ? response.details : null;
+          const suffix =
+            nested && typeof nested === 'object' &&
+            'field' in nested && typeof nested.field === 'string'
+              ? nested.field : null;
+          throw new ServiceUnavailableException({
+            ...response,
+            details: { field: suffix ? `${field}.${suffix}` : field },
+          });
+        }
+      }
+      throw error;
+    }
+  }
+
+  private async projectHeroSlides(
+    transaction: ReadTransaction,
+    value: Prisma.JsonValue | undefined,
+    locale: Locale,
+  ) {
+    if (value === undefined) return [];
+    const localized = recordValue(value);
+    assertKeys(localized, ['bg', 'en']);
+    const bg = arrayValue(localized.bg, 10);
+    const en = arrayValue(localized.en, 10);
+    if (bg.length !== en.length) unavailable();
+    const slides = [];
+    for (const [index, raw] of (locale === 'bg' ? bg : en).entries()) {
+      const slide = await this.atField(`hero_slides.${locale}[${index}]`, async () => {
+        const source = recordValue(raw);
+        assertKeys(source, ['media_id', 'heading', 'text', 'cta']);
+        const mediaId = requiredString(source.media_id, 36);
+        if (!isUuid(mediaId)) unavailable();
+        const media = (await this.mediaByIds(transaction, [mediaId], locale))[0];
+        let cta: ResolvedLink | null = null;
+        if (source.cta !== null) {
+          const ctaSource = recordValue(source.cta);
+          assertKeys(ctaSource, ['label', 'target']);
+          cta = await this.resolveTarget(
+            transaction, this.linkTarget(ctaSource.target),
+            requiredString(ctaSource.label, 255), locale,
+          );
+          if (!cta) unavailable('LINK_TARGET_UNAVAILABLE', 'errors.validation');
+        }
+        return {
+          media,
+          heading: nullableString(source.heading, 255),
+          text: nullableString(source.text, 3000),
+          cta,
+        };
+      });
+      slides.push(slide);
+    }
+    return slides;
   }
 
   private async projectSections(
@@ -1450,14 +1547,17 @@ export class PublicContentService {
     const special = recordValue(value);
     if (special.kind !== type) unavailable();
     if (type === 'home') {
-      assertKeys(special, ['kind', 'section_keys']);
+      assertKeys(special, ['kind', 'section_keys', 'hero_slides']);
       const keys = arrayValue(special.section_keys, 11);
       if (
         keys.length !== HOME_SECTIONS.length ||
         keys.some((key, index) => key !== HOME_SECTIONS[index])
       )
         unavailable();
-      return { kind: 'home' as const };
+      return {
+        kind: 'home' as const,
+        hero_slides: await this.projectHeroSlides(transaction, special.hero_slides, locale),
+      };
     }
     if (type === 'hub' || type === 'selection') {
       assertKeys(special, ['kind', 'selector_key']);
@@ -1849,14 +1949,8 @@ export class PublicContentService {
       await this.storeDto(transaction, store, locale);
       return { label, url: routeUrl(route[locale], this.siteOrigin()) };
     }
-    const policyKinds: Partial<Record<string, PolicyKind>> = {
-      R070: 'delivery_returns',
-      R071: 'terms',
-      R072: 'privacy',
-      R073: 'cookies',
-      R074: 'accessibility',
-    };
-    const policyKind = policyKinds[target.routeId];
+    const policyKind = (Object.keys(POLICY_ROUTES) as PolicyKind[])
+      .find((kind) => POLICY_ROUTES[kind] === target.routeId);
     if (policyKind) {
       const policy = await transaction.policyVersion.findFirst({
         where: {
@@ -1867,7 +1961,8 @@ export class PublicContentService {
         },
         select: { url: true },
       });
-      return policy ? { label, url: this.policyUrl(policy.url) } : null;
+      return policy
+        ? { label, url: this.policyUrl(policy.url, policyKind, locale) } : null;
     }
     const path = route[locale];
     const current = await transaction.publicRoute.findFirst({
@@ -1991,24 +2086,31 @@ export class PublicContentService {
     return routeUrl(route[locale], this.siteOrigin());
   }
 
-  private policyUrl(value: string): string {
+  private policyUrl(
+    value: string, kind: PolicyKind, locale: Locale, requireCurrentOrigin = false,
+  ): string {
     const origin = this.siteOrigin();
     let url: URL;
+    let path: string;
     try {
       url = new URL(value);
+      path = decodeURI(url.pathname);
     } catch {
       unavailable('ROUTE_CONFLICT', 'errors.route_unavailable');
     }
+    const route = routeRegistry.find((item) => item.id === POLICY_ROUTES[kind]);
     if (
-      url.origin !== origin.origin ||
-      !url.pathname.startsWith('/') ||
+      !['http:', 'https:'].includes(url.protocol) ||
+      (requireCurrentOrigin && url.origin !== origin.origin) ||
+      !route || path !== route[locale] ||
       url.username ||
       url.password ||
+      url.search ||
       url.hash
     ) {
       unavailable('ROUTE_CONFLICT', 'errors.route_unavailable');
     }
-    return url.toString();
+    return routeUrl(route[locale], origin);
   }
 
   private dateValue(value: Prisma.JsonValue | undefined): string {
@@ -2041,10 +2143,11 @@ export class PublicContentService {
 
   private alternatePolicyUrl(
     values: { locale: Locale; url: string }[],
+    kind: PolicyKind,
     locale: Locale,
   ): string | null {
     const value = values.find((item) => item.locale === locale)?.url;
-    return value ? this.policyUrl(value) : null;
+    return value ? this.policyUrl(value, kind, locale) : null;
   }
 
   private siteOrigin(): URL {

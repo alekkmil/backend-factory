@@ -11,6 +11,7 @@ import {
   IsUUID,
   Matches,
   MaxLength,
+  ValidateIf,
   ValidateNested,
 } from 'class-validator';
 
@@ -31,6 +32,10 @@ export class WebsiteMediaImageDto {
 
   @IsBoolean()
   processed_with_ai!: boolean;
+
+  @ValidateIf((_, value: unknown) => value !== undefined)
+  @IsBoolean()
+  on_model_illustrative?: boolean;
 }
 
 export class WebsiteMediaUploadDto {
