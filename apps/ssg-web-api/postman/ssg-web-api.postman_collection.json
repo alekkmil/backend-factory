@@ -101,7 +101,8 @@
     { "key": "websitePolicyKind", "value": "cookies", "type": "string" },
     { "key": "websitePolicyVersion", "value": "v1", "type": "string" },
     { "key": "websiteExpectedCurrentVersion", "value": "null", "type": "string" },
-    { "key": "websiteSiteOrigin", "value": "http://localhost:3000", "type": "string" }
+    { "key": "websiteSiteOrigin", "value": "http://localhost:3000", "type": "string" },
+    { "key": "websiteMediaRequestId", "value": "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee", "type": "string" }
   ],
   "item": [
     {
@@ -567,7 +568,17 @@
         },
         {
           "name": "Read assembled HOME",
-          "request": { "method": "GET", "header": [], "url": "{{baseUrl}}/api/home?locale={{locale}}", "description": "Uses the published HOME source and its eleven section keys; resolves only public links, records, products and stores." },
+          "request": { "method": "GET", "header": [], "url": "{{baseUrl}}/api/home?locale={{locale}}", "description": "Set locale to bg or en. Returns all eleven keys and mapped content_blocks: HOME source block 0 in hero, block 1 in consultation_stores, and blocks 2 onward in categories. Check the same mapping in each locale; media contains localized alt text and public variants." },
+          "response": []
+        },
+        {
+          "name": "Read assembled HOME (Bulgarian)",
+          "request": { "method": "GET", "header": [], "url": "{{baseUrl}}/api/home?locale=bg", "description": "Verify the Bulgarian HOME source block mapping and localized media URLs/alt text." },
+          "response": []
+        },
+        {
+          "name": "Read assembled HOME (English)",
+          "request": { "method": "GET", "header": [], "url": "{{baseUrl}}/api/home?locale=en", "description": "Verify the English HOME source block mapping and localized media URLs/alt text." },
           "response": []
         },
         {
@@ -757,8 +768,37 @@
     },
     {
       "name": "Website content management",
-      "description": "Development staff auth, same as catalogue. GET editable data first. PUT replaces entire page/store; use expected_updated_at:null to create or the last updated_at as a JSON-quoted string to edit. Generate a new websiteRequestId for edits. Saves are public immediately when published:true. Preserve full link arrays. Policy text is immutable: use a new version for text edits. Use websiteExpectedCurrentVersion as null initially or a JSON-quoted current version. No database migration needed.",
+      "description": "Development staff auth, same as catalogue. GET editable data first. PUT replaces entire page/store; use expected_updated_at:null to create or the last updated_at as a JSON-quoted string to edit. Generate a new websiteRequestId for edits. Saves are public immediately when published:true. Preserve full link arrays. Policy text is immutable: use a new version for text edits. Use websiteExpectedCurrentVersion as null initially or a JSON-quoted current version. Editorial image upload requires the 20261110140000 migration and DEV_CATALOGUE_PUBLISH_ENABLED=true; no product/dummy product is needed.",
       "item": [
+        {
+          "name": "Upload editorial or boutique images",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Origin", "value": "{{frontendOrigin}}" },
+              { "key": "X-Dev-Staff-Token", "value": "{{devStaffAuthToken}}" },
+              { "key": "X-CSRF-Token", "value": "{{devStaffCsrfToken}}" }
+            ],
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "metadata",
+                  "value": "{\"request_id\":\"{{websiteMediaRequestId}}\",\"images\":[{\"client_key\":\"hero\",\"alt_bg\":\"REPLACE_WITH_APPROVED_ALT_BG\",\"alt_en\":\"REPLACE_WITH_APPROVED_ALT_EN\",\"processed_with_ai\":false}]}",
+                  "type": "text"
+                },
+                {
+                  "key": "image_hero",
+                  "type": "file",
+                  "src": ""
+                }
+              ]
+            },
+            "url": "{{baseUrl}}/api/admin/website/media",
+            "description": "Select an image file for image_hero. Supports 1-5 JPEG/PNG/WebP files up to 10 MiB each, with a 1600px minimum long edge. Include one metadata image item and matching image_<client_key> file per asset. Requires DEV_CATALOGUE_PUBLISH_ENABLED=true as well as staff auth. Returns approved media IDs and BG/EN public variants; add the returned UUID to image sections, link_cards items, or store media_ids. Upload does not publish or edit a page/store."
+          },
+          "response": []
+        },
         {
           "name": "Read editable website page",
           "request": {
@@ -784,11 +824,11 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"request_id\": \"{{websiteRequestId}}\",\n  \"expected_updated_at\": {{websiteExpectedUpdatedAt}},\n  \"type\": \"home\",\n  \"parent_id\": null,\n  \"author_id\": null,\n  \"special_data\": {\n    \"kind\": \"home\",\n    \"section_keys\": [\"hero\", \"categories\", \"campaigns\", \"selected_products\", \"engagement_wedding\", \"knowledge\", \"services\", \"heritage\", \"stories\", \"consultation_stores\", \"footer\"]\n  },\n  \"translations\": [\n    { \"locale\": \"bg\", \"path\": \"/\", \"published\": true, \"title\": \"SSG\", \"intro\": null, \"seo_title\": null, \"seo_description\": null, \"sections\": [] },\n    { \"locale\": \"en\", \"path\": \"/en/\", \"published\": true, \"title\": \"SSG\", \"intro\": null, \"seo_title\": null, \"seo_description\": null, \"sections\": [] }\n  ],\n  \"links\": [\n    { \"slot\": \"selected_products\", \"sort_order\": 1, \"target\": { \"kind\": \"product\", \"id\": \"{{productId}}\" }, \"label_bg\": null, \"label_en\": null }\n  ]\n}",
+              "raw": "{\n  \"request_id\": \"{{websiteRequestId}}\",\n  \"expected_updated_at\": {{websiteExpectedUpdatedAt}},\n  \"type\": \"home\",\n  \"parent_id\": null,\n  \"author_id\": null,\n  \"special_data\": {\n    \"kind\": \"home\",\n    \"section_keys\": [\"hero\", \"categories\", \"campaigns\", \"selected_products\", \"engagement_wedding\", \"knowledge\", \"services\", \"heritage\", \"stories\", \"consultation_stores\", \"footer\"]\n  },\n  \"translations\": [\n    { \"locale\": \"bg\", \"path\": \"/\", \"published\": true, \"title\": \"SSG\", \"intro\": null, \"seo_title\": null, \"seo_description\": null, \"sections\": [] },\n    { \"locale\": \"en\", \"path\": \"/en/\", \"published\": true, \"title\": \"SSG\", \"intro\": null, \"seo_title\": null, \"seo_description\": null, \"sections\": [] }\n  ],\n  \"links\": [\n    { \"slot\": \"categories\", \"sort_order\": 1, \"target\": { \"kind\": \"route\", \"route_id\": \"R002\" }, \"label_bg\": \"Всички бижута\", \"label_en\": \"All jewellery\" },\n    { \"slot\": \"categories\", \"sort_order\": 2, \"target\": { \"kind\": \"route\", \"route_id\": \"R003\" }, \"label_bg\": \"Пръстени\", \"label_en\": \"Rings\" },\n    { \"slot\": \"categories\", \"sort_order\": 3, \"target\": { \"kind\": \"route\", \"route_id\": \"R004\" }, \"label_bg\": \"Колиета и медальони\", \"label_en\": \"Necklaces and pendants\" },\n    { \"slot\": \"categories\", \"sort_order\": 4, \"target\": { \"kind\": \"route\", \"route_id\": \"R005\" }, \"label_bg\": \"Обеци\", \"label_en\": \"Earrings\" },\n    { \"slot\": \"categories\", \"sort_order\": 5, \"target\": { \"kind\": \"route\", \"route_id\": \"R006\" }, \"label_bg\": \"Гривни\", \"label_en\": \"Bracelets\" },\n    { \"slot\": \"categories\", \"sort_order\": 6, \"target\": { \"kind\": \"route\", \"route_id\": \"R007\" }, \"label_bg\": \"Брошки\", \"label_en\": \"Brooches\" },\n    { \"slot\": \"selected_products\", \"sort_order\": 1, \"target\": { \"kind\": \"product\", \"id\": \"{{productId}}\" }, \"label_bg\": null, \"label_en\": null }\n  ]\n}",
               "options": { "raw": { "language": "json" } }
             },
             "url": "{{baseUrl}}/api/admin/website/content/home",
-            "description": "productId must already be published in BG/EN. Returns the editable record and updated_at. Existing homepage edits require the last updated_at. Other page types use the same envelope with their source special_data and sections contracts; see README. Product/content/store/route/external link targets are supported."
+            "description": "Create-only example: expected_updated_at must remain null and productId must already be published in BG/EN. Includes writable R002-R007 catalogue CTA/category links. Do not use this abbreviated payload to update an existing HOME: GET it first and preserve its complete translations, source sections, and all current links (the deployed HOME may contain 33). Existing edits require the latest updated_at and a new request ID. See README for the block mapping and media references."
           },
           "response": []
         },
@@ -817,11 +857,11 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"request_id\": \"{{websiteRequestId}}\",\n  \"expected_updated_at\": {{websiteExpectedUpdatedAt}},\n  \"public_data\": {\n    \"bg\": { \"name\": \"REPLACE_WITH_VERIFIED_NAME_BG\", \"address\": \"REPLACE_WITH_VERIFIED_ADDRESS_BG\", \"opening_hours\": null, \"seasonal_note\": null },\n    \"en\": { \"name\": \"REPLACE_WITH_VERIFIED_NAME_EN\", \"address\": \"REPLACE_WITH_VERIFIED_ADDRESS_EN\", \"opening_hours\": null, \"seasonal_note\": null },\n    \"phone\": null, \"email\": null, \"maps_url\": null, \"media_ids\": []\n  }\n}",
+              "raw": "{\n  \"request_id\": \"{{websiteRequestId}}\",\n  \"expected_updated_at\": {{websiteExpectedUpdatedAt}},\n  \"public_data\": {\n    \"bg\": { \"name\": \"REPLACE_WITH_VERIFIED_NAME_BG\", \"address\": \"REPLACE_WITH_VERIFIED_ADDRESS_BG\", \"opening_hours\": null, \"seasonal_note\": null },\n    \"en\": { \"name\": \"REPLACE_WITH_VERIFIED_NAME_EN\", \"address\": \"REPLACE_WITH_VERIFIED_ADDRESS_EN\", \"opening_hours\": null, \"seasonal_note\": null },\n    \"phone\": null, \"email\": null, \"emails\": [], \"maps_url\": null, \"media_ids\": []\n  }\n}",
               "options": { "raw": { "language": "json" } }
             },
             "url": "{{baseUrl}}/api/admin/website/stores/{{storeCode}}",
-            "description": "Replace synthetic placeholder text with confirmed public facts. Supports only sofia/nessebar. Does not create stock or change shop currency."
+            "description": "Replace synthetic placeholder text with confirmed public facts. Supports only sofia/nessebar. `emails` may contain up to five addresses; the legacy `email` field must match the first address. For Nessebar use the approved pair nesebarg@ssg.bg and nesebarm@ssg.bg. Does not create stock or change shop currency."
           },
           "response": []
         },

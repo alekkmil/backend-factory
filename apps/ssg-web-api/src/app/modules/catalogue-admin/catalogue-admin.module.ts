@@ -8,7 +8,7 @@ import { TransactionModule } from '../../common/transactions/transaction.module'
 import { OutboxModule } from '../../common/outbox/outbox.module';
 import { ProductReadModule } from '../products/product-read.module';
 import { CatalogueMediaService } from './catalogue-media.service';
-import { CatalogueMediaStorageService } from './catalogue-media-storage.service';
+import { MediaStorageService } from '../../common/media-storage.service';
 import { CatalogueDraftService } from './catalogue-draft.service';
 import { CatalogueVisibilityService } from './catalogue-visibility.service';
 import { CatalogueMediaRegistrationService } from './catalogue-media-registration.service';
@@ -20,7 +20,7 @@ import { CatalogueMediaRegistrationService } from './catalogue-media-registratio
     CatalogueAdminService,
     CataloguePublishService,
     CatalogueMediaService,
-    CatalogueMediaStorageService,
+    MediaStorageService,
     CatalogueDraftService,
     CatalogueVisibilityService,
     CatalogueMediaRegistrationService,

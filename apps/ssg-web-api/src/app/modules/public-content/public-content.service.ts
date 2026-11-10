@@ -66,6 +66,7 @@ interface StoreDto {
   address: string;
   phone: string | null;
   email: string | null;
+  emails: string[];
   opening_hours: string | null;
   seasonal_note: string | null;
   maps_url: string | null;
@@ -89,9 +90,7 @@ interface SeoUrl {
   lastmod: string | null;
 }
 
-function isRecord(
-  value: Prisma.JsonValue | undefined,
-): value is JsonRecord {
+function isRecord(value: Prisma.JsonValue | undefined): value is JsonRecord {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
 }
 
@@ -149,10 +148,7 @@ function isUuid(value: string): boolean {
 
 function validEmail(value: string | null): string | null {
   if (value === null) return null;
-  if (
-    value.length > 320 ||
-    !/^[^\s@]+@[^\s@]+\.[^\s@]+$/u.test(value)
-  ) {
+  if (value.length > 320 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/u.test(value)) {
     unavailable();
   }
   return value;
@@ -221,6 +217,27 @@ function contentSummaryFrom(
     url: routeUrl(route.path, origin),
     primary_image: primaryImage,
   };
+}
+
+function publicEmails(
+  legacyEmail: Prisma.JsonValue | undefined,
+  emailValues: Prisma.JsonValue | undefined,
+): string[] {
+  const legacy =
+    legacyEmail === undefined
+      ? null
+      : validEmail(nullableString(legacyEmail, 320));
+  if (emailValues === undefined) return legacy ? [legacy] : [];
+  const emails = arrayValue(emailValues, 5).map((value) =>
+    validEmail(requiredString(value, 320)),
+  );
+  if (
+    emails.some((email) => email === null) ||
+    new Set(emails).size !== emails.length
+  )
+    unavailable();
+  if (legacy && emails[0] !== legacy) unavailable();
+  return emails.filter((email): email is string => email !== null);
 }
 
 @Injectable()
@@ -316,9 +333,7 @@ export class PublicContentService {
       const origin = this.siteOrigin();
       const imageIds = page.flatMap((row) => {
         const translation = row.from_ContentTranslation_contentId[0];
-        const id = translation
-          ? this.firstImageId(translation.sections)
-          : null;
+        const id = translation ? this.firstImageId(translation.sections) : null;
         return id ? [id] : [];
       });
       const media = await this.mediaByIds(
@@ -336,7 +351,7 @@ export class PublicContentService {
           row,
           query.locale,
           origin,
-          imageId ? mediaById.get(imageId) ?? null : null,
+          imageId ? (mediaById.get(imageId) ?? null) : null,
         );
       });
       return {
@@ -355,114 +370,128 @@ export class PublicContentService {
   }
 
   async home(locale: Locale) {
-    return this.read((transaction) => this.homeInTransaction(transaction, locale));
+    return this.read((transaction) =>
+      this.homeInTransaction(transaction, locale),
+    );
   }
 
   async homeInTransaction(transaction: ReadTransaction, locale: Locale) {
-      const homeRecords = await transaction.contentRecord.findMany({
-        where: {
-          type: 'home',
-          from_ContentTranslation_contentId: {
-            some: { locale, published: true },
-          },
-          from_PublicRoute_contentId: { some: { locale, state: 'current' } },
+    const homeRecords = await transaction.contentRecord.findMany({
+      where: {
+        type: 'home',
+        from_ContentTranslation_contentId: {
+          some: { locale, published: true },
         },
-        take: 2,
-        select: {
-          id: true,
-          specialData: true,
+        from_PublicRoute_contentId: { some: { locale, state: 'current' } },
+      },
+      take: 2,
+      select: {
+        id: true,
+        specialData: true,
+        from_ContentTranslation_contentId: {
+          where: { locale, published: true },
+          select: { locale: true, sections: true },
         },
-      });
-      if (homeRecords.length === 0) throw new NotFoundException();
-      if (homeRecords.length !== 1) unavailable();
-      const special = recordValue(homeRecords[0].specialData);
-      assertKeys(special, ['kind', 'section_keys']);
-      if (special.kind !== 'home') unavailable();
-      const keys = arrayValue(special.section_keys, 11);
-      if (
-        keys.length !== HOME_SECTIONS.length ||
-        keys.some((entry, index) => entry !== HOME_SECTIONS[index])
-      ) {
-        unavailable();
-      }
+      },
+    });
+    if (homeRecords.length === 0) throw new NotFoundException();
+    if (homeRecords.length !== 1) unavailable();
+    const special = recordValue(homeRecords[0].specialData);
+    assertKeys(special, ['kind', 'section_keys']);
+    if (special.kind !== 'home') unavailable();
+    const keys = arrayValue(special.section_keys, 11);
+    if (
+      keys.length !== HOME_SECTIONS.length ||
+      keys.some((entry, index) => entry !== HOME_SECTIONS[index])
+    ) {
+      unavailable();
+    }
+    const homeTranslation = homeRecords[0].from_ContentTranslation_contentId[0];
+    if (!homeTranslation) throw new NotFoundException();
+    const homeBlocks = await this.projectSections(
+      transaction,
+      homeTranslation.sections,
+      locale,
+    );
+    const contentBlocks = new Map<string, typeof homeBlocks>([
+      ['hero', homeBlocks.slice(0, 1)],
+      ['consultation_stores', homeBlocks.slice(1, 2)],
+      ['categories', homeBlocks.slice(2)],
+    ]);
 
-      const links = await transaction.contentLink.findMany({
-        where: { ownerContentId: homeRecords[0].id },
-        orderBy: [{ slot: 'asc' }, { sortOrder: 'asc' }, { id: 'asc' }],
-        select: {
-          slot: true,
-          sortOrder: true,
-          targetContentId: true,
-          targetProductId: true,
-          targetStoreCode: true,
-          routeId: true,
-          externalUrl: true,
-          labelBg: true,
-          labelEn: true,
-        },
-      });
-      const sections = [];
-      for (const key of HOME_SECTIONS) {
-        const contentRecords: object[] = [];
-        const productItems: ProductSummary[] = [];
-        const storeItems: StoreDto[] = [];
-        const resolved: ResolvedLink[] = [];
-        for (const link of links.filter((item) => item.slot === key)) {
-          const label =
-            locale === 'bg' ? link.labelBg : link.labelEn;
-          if (link.targetContentId) {
-            const record = await transaction.contentRecord.findFirst({
-              where: {
-                id: link.targetContentId,
-                from_ContentTranslation_contentId: {
-                  some: { locale, published: true },
-                },
-                from_PublicRoute_contentId: {
-                  some: { locale, state: 'current' },
-                },
+    const links = await transaction.contentLink.findMany({
+      where: { ownerContentId: homeRecords[0].id },
+      orderBy: [{ slot: 'asc' }, { sortOrder: 'asc' }, { id: 'asc' }],
+      select: {
+        slot: true,
+        sortOrder: true,
+        targetContentId: true,
+        targetProductId: true,
+        targetStoreCode: true,
+        routeId: true,
+        externalUrl: true,
+        labelBg: true,
+        labelEn: true,
+      },
+    });
+    const sections = [];
+    for (const key of HOME_SECTIONS) {
+      const contentRecords: object[] = [];
+      const productItems: ProductSummary[] = [];
+      const storeItems: StoreDto[] = [];
+      const resolved: ResolvedLink[] = [];
+      for (const link of links.filter((item) => item.slot === key)) {
+        const label = locale === 'bg' ? link.labelBg : link.labelEn;
+        if (link.targetContentId) {
+          const record = await transaction.contentRecord.findFirst({
+            where: {
+              id: link.targetContentId,
+              from_ContentTranslation_contentId: {
+                some: { locale, published: true },
               },
-              select: { id: true },
-            });
-            if (!record) continue;
-            const detail = await this.contentDetailInTransaction(
-              transaction,
-              record.id,
-              locale,
-            );
-            contentRecords.push(detail);
-            if (label) resolved.push({ label, url: detail.url });
-            continue;
-          }
-          const result = await this.resolveStoredLink(
+              from_PublicRoute_contentId: {
+                some: { locale, state: 'current' },
+              },
+            },
+            select: { id: true },
+          });
+          if (!record) continue;
+          const detail = await this.contentDetailInTransaction(
             transaction,
-            link,
+            record.id,
             locale,
           );
-          if (!result) continue;
-          if (result.kind === 'content') contentRecords.push(result.value);
-          if (result.kind === 'product') productItems.push(result.value);
-          if (result.kind === 'store') storeItems.push(result.value);
-          if (result.kind === 'link') resolved.push(result.value);
-          if (result.kind !== 'link' && label) {
-            resolved.push({
-              label,
-              url:
-                result.kind === 'store'
-                  ? this.storeUrl(result.value.code, locale)
-                  : this.valueUrl(result.value),
-            });
-          }
+          contentRecords.push(detail);
+          if (label) resolved.push({ label, url: detail.url });
+          continue;
         }
-        sections.push({
-          key,
-          content: null,
-          products: productItems,
-          records: contentRecords,
-          stores: storeItems,
-          links: resolved,
-        });
+        const result = await this.resolveStoredLink(transaction, link, locale);
+        if (!result) continue;
+        if (result.kind === 'content') contentRecords.push(result.value);
+        if (result.kind === 'product') productItems.push(result.value);
+        if (result.kind === 'store') storeItems.push(result.value);
+        if (result.kind === 'link') resolved.push(result.value);
+        if (result.kind !== 'link' && label) {
+          resolved.push({
+            label,
+            url:
+              result.kind === 'store'
+                ? this.storeUrl(result.value.code, locale)
+                : this.valueUrl(result.value),
+          });
+        }
       }
-      return { locale, sections };
+      sections.push({
+        key,
+        content: null,
+        content_blocks: contentBlocks.get(key) ?? [],
+        products: productItems,
+        records: contentRecords,
+        stores: storeItems,
+        links: resolved,
+      });
+    }
+    return { locale, sections };
   }
 
   async stores(locale: Locale): Promise<{ items: StoreDto[] }> {
@@ -509,9 +538,16 @@ export class PublicContentService {
     });
     if (!settings) unavailable();
     const contact = recordValue(settings.siteContacts);
-    assertKeys(contact, ['phone', 'email', 'store_codes', 'verified_links']);
+    assertKeys(contact, [
+      'phone',
+      'email',
+      'emails',
+      'store_codes',
+      'verified_links',
+    ]);
     const phone = validPhone(nullableString(contact.phone, 40));
-    const email = validEmail(nullableString(contact.email, 320));
+    const emails = publicEmails(contact.email, contact.emails);
+    const email = emails[0] ?? null;
     const codes = arrayValue(contact.store_codes, 2).map((value) => {
       if (value !== 'sofia' && value !== 'nessebar') unavailable();
       return value;
@@ -543,7 +579,7 @@ export class PublicContentService {
         return { label, url };
       },
     );
-    return { phone, email, stores, links };
+    return { phone, email, emails, stores, links };
   }
 
   async policy(kind: PolicyKind, query: PolicyQueryDto) {
@@ -554,9 +590,7 @@ export class PublicContentService {
           kind,
           locale: query.locale,
           published: true,
-          ...(version
-            ? { versionLabel: version }
-            : { current: true }),
+          ...(version ? { versionLabel: version } : { current: true }),
         },
         select: {
           id: true,
@@ -584,91 +618,99 @@ export class PublicContentService {
   }
 
   async cookieConfig(locale: Locale) {
-    return this.read((transaction) => this.cookieConfigInTransaction(transaction, locale));
+    return this.read((transaction) =>
+      this.cookieConfigInTransaction(transaction, locale),
+    );
   }
 
-  async cookieConfigInTransaction(transaction: ReadTransaction, locale: Locale) {
-      const settings = await transaction.shopSettings.findUnique({
-        where: { id: 1 },
-        select: { cookieConfig: true },
-      });
-      if (!settings) unavailable();
-      const config = recordValue(settings.cookieConfig);
-      assertKeys(config, [
-        'version',
-        'policy_version',
-        'necessary_enabled',
-        'optional_categories',
-        'providers',
-        'persistence_days',
+  async cookieConfigInTransaction(
+    transaction: ReadTransaction,
+    locale: Locale,
+  ) {
+    const settings = await transaction.shopSettings.findUnique({
+      where: { id: 1 },
+      select: { cookieConfig: true },
+    });
+    if (!settings) unavailable();
+    const config = recordValue(settings.cookieConfig);
+    assertKeys(config, [
+      'version',
+      'policy_version',
+      'necessary_enabled',
+      'optional_categories',
+      'providers',
+      'persistence_days',
+    ]);
+    if (config.necessary_enabled !== true) unavailable();
+    const version = requiredString(config.version, 80);
+    const policyVersion = requiredString(config.policy_version, 80);
+    const categories = arrayValue(config.optional_categories, 2).map(
+      (value) => {
+        if (value !== 'analytics' && value !== 'marketing') unavailable();
+        return value;
+      },
+    );
+    if (new Set(categories).size !== categories.length) unavailable();
+    const providers = arrayValue(config.providers, 50).map((value) => {
+      const provider = recordValue(value);
+      assertKeys(provider, [
+        'id',
+        'category',
+        'name',
+        'purpose_bg',
+        'purpose_en',
       ]);
-      if (config.necessary_enabled !== true) unavailable();
-      const version = requiredString(config.version, 80);
-      const policyVersion = requiredString(config.policy_version, 80);
-      const categories = arrayValue(config.optional_categories, 2).map(
-        (value) => {
-          if (value !== 'analytics' && value !== 'marketing') unavailable();
-          return value;
-        },
-      );
-      if (new Set(categories).size !== categories.length) unavailable();
-      const providers = arrayValue(config.providers, 50).map((value) => {
-        const provider = recordValue(value);
-        assertKeys(provider, [
-          'id',
-          'category',
-          'name',
-          'purpose_bg',
-          'purpose_en',
-        ]);
-        const id = requiredString(provider.id, 80);
-        const category = provider.category;
-        if (category !== 'analytics' && category !== 'marketing') unavailable();
-        if (!categories.includes(category)) unavailable();
-        return {
-          id,
-          category,
-          name: requiredString(provider.name, 255),
-          purpose:
-            locale === 'bg'
-              ? requiredString(provider.purpose_bg, 1000)
-              : requiredString(provider.purpose_en, 1000),
-        };
-      });
-      if (new Set(providers.map((provider) => provider.id)).size !== providers.length) {
-        unavailable();
-      }
-      const persistenceDays = config.persistence_days;
-      if (
-        persistenceDays !== null &&
-        (typeof persistenceDays !== 'number' ||
-          !Number.isInteger(persistenceDays) ||
-          persistenceDays < 1 ||
-          persistenceDays > 3650)
-      ) {
-        unavailable();
-      }
-      const policy = await transaction.policyVersion.findFirst({
-        where: {
-          kind: 'cookies',
-          locale,
-          versionLabel: policyVersion,
-          current: true,
-          published: true,
-        },
-        select: { url: true },
-      });
-      if (!policy) unavailable();
+      const id = requiredString(provider.id, 80);
+      const category = provider.category;
+      if (category !== 'analytics' && category !== 'marketing') unavailable();
+      if (!categories.includes(category)) unavailable();
       return {
-        version,
-        policy_url: this.policyUrl(policy.url),
-        necessary_enabled: true as const,
-        optional_categories: [
-          ...new Set(providers.map((provider) => provider.category)),
-        ],
-        providers,
-        persistence_days: persistenceDays,
+        id,
+        category,
+        name: requiredString(provider.name, 255),
+        purpose:
+          locale === 'bg'
+            ? requiredString(provider.purpose_bg, 1000)
+            : requiredString(provider.purpose_en, 1000),
       };
+    });
+    if (
+      new Set(providers.map((provider) => provider.id)).size !==
+      providers.length
+    ) {
+      unavailable();
+    }
+    const persistenceDays = config.persistence_days;
+    if (
+      persistenceDays !== null &&
+      (typeof persistenceDays !== 'number' ||
+        !Number.isInteger(persistenceDays) ||
+        persistenceDays < 1 ||
+        persistenceDays > 3650)
+    ) {
+      unavailable();
+    }
+    const policy = await transaction.policyVersion.findFirst({
+      where: {
+        kind: 'cookies',
+        locale,
+        versionLabel: policyVersion,
+        current: true,
+        published: true,
+      },
+      select: { url: true },
+    });
+    if (!policy) unavailable();
+    return {
+      version,
+      policy_url: this.policyUrl(policy.url),
+      necessary_enabled: true as const,
+      optional_categories: [
+        ...new Set(providers.map((provider) => provider.category)),
+      ],
+      providers,
+      persistence_days: persistenceDays,
+    };
   }
 
   async seoUrls(query: SeoUrlsQueryDto) {
@@ -734,11 +776,21 @@ export class PublicContentService {
         },
       });
       const entries = [
-        ...routes.map((route) => ({ id: route.id, type: 'route' as const, route })),
-        ...policies.map((policy) => ({ id: policy.id, type: 'policy' as const, policy })),
-        ...(await this.staticSeoEntries(transaction, afterId)).map(
-          (entry) => ({ id: entry.id, type: 'static' as const, entry }),
-        ),
+        ...routes.map((route) => ({
+          id: route.id,
+          type: 'route' as const,
+          route,
+        })),
+        ...policies.map((policy) => ({
+          id: policy.id,
+          type: 'policy' as const,
+          policy,
+        })),
+        ...(await this.staticSeoEntries(transaction, afterId)).map((entry) => ({
+          id: entry.id,
+          type: 'static' as const,
+          entry,
+        })),
       ].sort((left, right) => left.id.localeCompare(right.id));
       const page = entries.slice(0, query.limit);
       const items: SeoUrl[] = [];
@@ -871,7 +923,7 @@ export class PublicContentService {
         }
       }
       const next =
-        entries.length > query.limit ? page.at(-1)?.id ?? null : null;
+        entries.length > query.limit ? (page.at(-1)?.id ?? null) : null;
       const uniqueItems = new Map<string, SeoUrl>();
       for (const item of items) {
         uniqueItems.set(`${item.locale}\u0000${item.url}`, item);
@@ -925,7 +977,8 @@ export class PublicContentService {
 
       for (const row of storeRows) {
         const storeRoute = route(row.code === 'sofia' ? 'R065' : 'R066');
-        if (!storeRoute) unavailable('ROUTE_CONFLICT', 'errors.route_unavailable');
+        if (!storeRoute)
+          unavailable('ROUTE_CONFLICT', 'errors.route_unavailable');
         await this.storeDto(transaction, row, 'bg');
         await this.storeDto(transaction, row, 'en');
         const hasBg = !(await isAlreadyRouted(storeRoute.bg, 'bg'));
@@ -1060,16 +1113,14 @@ export class PublicContentService {
       locale,
     );
     const primaryImage =
-      sections.find((section) => section.kind === 'image')?.media ??
-      sections.find((section) => section.kind === 'link_cards')
-        ?.items.find((item) => item.media !== null)?.media ??
-      null;
-    const summary = contentSummaryFrom(
-      record,
-      locale,
-      origin,
-      primaryImage,
-    );
+      record.type === 'home'
+        ? null
+        : (sections.find((section) => section.kind === 'image')?.media ??
+          sections
+            .find((section) => section.kind === 'link_cards')
+            ?.items.find((item) => item.media !== null)?.media ??
+          null);
+    const summary = contentSummaryFrom(record, locale, origin, primaryImage);
     const special = await this.projectSpecial(
       transaction,
       record.type,
@@ -1078,10 +1129,12 @@ export class PublicContentService {
       locale,
     );
     const children: ResolvedLink[] = [];
+    const childIds = new Set<string>();
     for (const link of record.from_ContentLink_ownerContentId) {
       if (link.slot !== 'children' || !link.targetContentId) continue;
       const resolved = await this.resolveStoredLink(transaction, link, locale);
       if (resolved?.kind === 'content') {
+        childIds.add(resolved.value.id);
         children.push({
           label:
             (locale === 'bg' ? link.labelBg : link.labelEn) ??
@@ -1090,23 +1143,54 @@ export class PublicContentService {
         });
       }
     }
-    const relatedLinks = await transaction.productRelatedLink.findMany({
-      where: { productId: id },
-      orderBy: [{ sortOrder: 'asc' }, { id: 'asc' }],
-      take: 50,
-      select: { relatedProductId: true },
+    const childRecords = await transaction.contentRecord.findMany({
+      where: {
+        parentId: record.id,
+        from_ContentTranslation_contentId: {
+          some: { locale, published: true },
+        },
+        from_PublicRoute_contentId: { some: { locale, state: 'current' } },
+      },
+      orderBy: [{ key: 'asc' }, { id: 'asc' }],
+      take: 100,
+      select: { id: true },
     });
+    for (const child of childRecords) {
+      if (childIds.has(child.id)) continue;
+      const summary = await this.contentSummary(transaction, child.id, locale);
+      if (summary) {
+        childIds.add(child.id);
+        children.push({ label: summary.title, url: summary.url });
+      }
+    }
+    const contentRelatedIds = record.from_ContentLink_ownerContentId
+      .filter(
+        (link) => link.slot === 'related_products' && link.targetProductId,
+      )
+      .flatMap((link) => (link.targetProductId ? [link.targetProductId] : []))
+      .slice(0, 50);
+    const relatedLinks = contentRelatedIds.length
+      ? contentRelatedIds.map((relatedProductId) => ({ relatedProductId }))
+      : await transaction.productRelatedLink.findMany({
+          where: { productId: id },
+          orderBy: [{ sortOrder: 'asc' }, { id: 'asc' }],
+          take: 50,
+          select: { relatedProductId: true },
+        });
+    const relatedProductIds = [
+      ...new Set(relatedLinks.map((link) => link.relatedProductId)),
+    ];
     const candidates = await this.products.catalogCandidates(
       transaction,
-      relatedLinks.map((link) => link.relatedProductId),
+      relatedProductIds,
       locale,
       null,
     );
     const candidateById = new Map(
       candidates.map((candidate) => [candidate.summary.id, candidate.summary]),
     );
-    const relatedProducts = relatedLinks.flatMap((link) => {
-      const candidate = candidateById.get(link.relatedProductId);
+    const relatedProducts = relatedProductIds.flatMap((relatedProductId) => {
+      const candidate = candidateById.get(relatedProductId);
       return candidate ? [candidate] : [];
     });
     const publishedLocales = new Set(
@@ -1161,9 +1245,18 @@ export class PublicContentService {
       nullableString(translation.seo_title, 250);
       nullableString(translation.seo_description, 1000);
       await this.projectSpecial(
-        transaction, input.type, input.special_data, input.author_id, translation.locale,
+        transaction,
+        input.type,
+        input.special_data,
+        input.author_id,
+        translation.locale,
       );
-      await this.projectSections(transaction, translation.sections, translation.locale, true);
+      await this.projectSections(
+        transaction,
+        translation.sections,
+        translation.locale,
+        true,
+      );
     }
   }
 
@@ -1175,7 +1268,12 @@ export class PublicContentService {
   ): Promise<void> {
     const parsed = this.linkTarget(target);
     if (label !== null) requiredString(label, 255);
-    const resolved = await this.resolveTarget(transaction, parsed, label ?? 'link', locale);
+    const resolved = await this.resolveTarget(
+      transaction,
+      parsed,
+      label ?? 'link',
+      locale,
+    );
     if (!resolved) unavailable('LINK_TARGET_UNAVAILABLE', 'errors.validation');
   }
 
@@ -1199,10 +1297,30 @@ export class PublicContentService {
     const rawSections = arrayValue(value, 200);
     const sections: (
       | { kind: 'text'; heading: string | null; text: string }
-      | { kind: 'image'; media: ReturnType<typeof projectMedia>; caption: string | null }
-      | { kind: 'link_cards'; items: { label: string; text: string | null; link: ResolvedLink | null; media: ReturnType<typeof projectMedia> | null }[] }
-      | { kind: 'data_table'; caption: string; columns: { key: string; label: string; unit: string | null }[]; rows: { cells: (string | null)[] }[] }
-      | { kind: 'faq'; items: { question: string; answer: string; links: ResolvedLink[] }[] }
+      | {
+          kind: 'image';
+          media: ReturnType<typeof projectMedia>;
+          caption: string | null;
+        }
+      | {
+          kind: 'link_cards';
+          items: {
+            label: string;
+            text: string | null;
+            link: ResolvedLink | null;
+            media: ReturnType<typeof projectMedia> | null;
+          }[];
+        }
+      | {
+          kind: 'data_table';
+          caption: string;
+          columns: { key: string; label: string; unit: string | null }[];
+          rows: { cells: (string | null)[] }[];
+        }
+      | {
+          kind: 'faq';
+          items: { question: string; answer: string; links: ResolvedLink[] }[];
+        }
     )[] = [];
     for (const value of rawSections) {
       const section = recordValue(value);
@@ -1245,7 +1363,8 @@ export class PublicContentService {
             label,
             locale,
           );
-          if (requireResolvedLinks && !link) unavailable('LINK_TARGET_UNAVAILABLE', 'errors.validation');
+          if (requireResolvedLinks && !link)
+            unavailable('LINK_TARGET_UNAVAILABLE', 'errors.validation');
           let media: ReturnType<typeof projectMedia> | null = null;
           if (card.media_id !== null) {
             const mediaId = requiredString(card.media_id, 36);
@@ -1268,8 +1387,7 @@ export class PublicContentService {
           return {
             key: requiredString(column.key, 80),
             label: requiredString(column.label, 255),
-            unit:
-              column.unit === null ? null : requiredString(column.unit, 80),
+            unit: column.unit === null ? null : requiredString(column.unit, 80),
           };
         });
         const rows = arrayValue(section.rows, 100).map((rowValue) => {
@@ -1304,7 +1422,8 @@ export class PublicContentService {
               label,
               locale,
             );
-            if (requireResolvedLinks && !resolved) unavailable('LINK_TARGET_UNAVAILABLE', 'errors.validation');
+            if (requireResolvedLinks && !resolved)
+              unavailable('LINK_TARGET_UNAVAILABLE', 'errors.validation');
             if (resolved) links.push(resolved);
           }
           items.push({
@@ -1333,12 +1452,17 @@ export class PublicContentService {
     if (type === 'home') {
       assertKeys(special, ['kind', 'section_keys']);
       const keys = arrayValue(special.section_keys, 11);
-      if (keys.length !== HOME_SECTIONS.length || keys.some((key, index) => key !== HOME_SECTIONS[index])) unavailable();
+      if (
+        keys.length !== HOME_SECTIONS.length ||
+        keys.some((key, index) => key !== HOME_SECTIONS[index])
+      )
+        unavailable();
       return { kind: 'home' as const };
     }
     if (type === 'hub' || type === 'selection') {
       assertKeys(special, ['kind', 'selector_key']);
-      if (special.selector_key !== null) requiredString(special.selector_key, 120);
+      if (special.selector_key !== null)
+        requiredString(special.selector_key, 120);
       return { kind: type };
     }
     if (type === 'knowledge') {
@@ -1354,12 +1478,7 @@ export class PublicContentService {
       >;
       for (const candidateLocale of ['bg', 'en'] as const) {
         const localized = recordValue(special[candidateLocale]);
-        assertKeys(localized, [
-          'name',
-          'heading',
-          'lead',
-          'detail_paragraphs',
-        ]);
+        assertKeys(localized, ['name', 'heading', 'lead', 'detail_paragraphs']);
         const paragraphs = arrayValue(localized.detail_paragraphs, 2);
         if (paragraphs.length !== 2) unavailable();
         localizedContent[candidateLocale] = {
@@ -1401,12 +1520,7 @@ export class PublicContentService {
       };
     }
     if (type === 'article' || type === 'case_study') {
-      assertKeys(special, [
-        'kind',
-        'event_at',
-        'sources',
-        'evidence_ref',
-      ]);
+      assertKeys(special, ['kind', 'event_at', 'sources', 'evidence_ref']);
       if (
         special.evidence_ref !== null &&
         (typeof special.evidence_ref !== 'string' ||
@@ -1423,18 +1537,11 @@ export class PublicContentService {
         if (author && author.type !== 'author') unavailable();
       }
       const eventAt =
-        special.event_at === null
-          ? null
-          : this.dateValue(special.event_at);
+        special.event_at === null ? null : this.dateValue(special.event_at);
       return { kind: type, author, event_at: eventAt, sources };
     }
     if (type === 'press') {
-      assertKeys(special, [
-        'kind',
-        'publisher',
-        'source_url',
-        'source_date',
-      ]);
+      assertKeys(special, ['kind', 'publisher', 'source_url', 'source_date']);
       return {
         kind: type,
         publisher: requiredString(special.publisher, 255),
@@ -1554,7 +1661,15 @@ export class PublicContentService {
     locale: Locale,
   ): Promise<StoreDto> {
     const data = recordValue(row.publicData);
-    assertKeys(data, ['bg', 'en', 'phone', 'email', 'maps_url', 'media_ids']);
+    assertKeys(data, [
+      'bg',
+      'en',
+      'phone',
+      'email',
+      'emails',
+      'maps_url',
+      'media_ids',
+    ]);
     const localized = recordValue(data[locale]);
     assertKeys(localized, [
       'name',
@@ -1571,13 +1686,15 @@ export class PublicContentService {
       data.maps_url === null
         ? null
         : externalUrl(requiredString(data.maps_url, 2000), this.production);
+    const emails = publicEmails(data.email, data.emails);
     return {
       code: row.code,
       locale,
       name: requiredString(localized.name, 255),
       address: requiredString(localized.address, 500),
       phone: validPhone(nullableString(data.phone, 40)),
-      email: validEmail(nullableString(data.email, 320)),
+      email: emails[0] ?? null,
+      emails,
       opening_hours: nullableString(localized.opening_hours, 1000),
       seasonal_note: nullableString(localized.seasonal_note, 1000),
       maps_url: mapsUrl,
@@ -1606,7 +1723,28 @@ export class PublicContentService {
         reviewStatus: true,
       },
     });
-    const byId = new Map(assets.map((asset) => [asset.id, asset]));
+    const editorialAssets = await transaction.websiteMediaAsset.findMany({
+      where: {
+        id: { in: ids },
+        reviewStatus: 'approved',
+        releaseIdRelation: { is: { approved: true } },
+      },
+      select: {
+        id: true,
+        releaseId: true,
+        logicalImageId: true,
+        role: true,
+        derivatives: true,
+        altBg: true,
+        altEn: true,
+        processedWithAi: true,
+        onModelIllustrative: true,
+        reviewStatus: true,
+      },
+    });
+    const byId = new Map(
+      [...assets, ...editorialAssets].map((asset) => [asset.id, asset]),
+    );
     const cdnOrigin = configurationUrl(
       this.config,
       'MEDIA_CDN_BASE_URL',
@@ -1615,12 +1753,7 @@ export class PublicContentService {
     return ids.map((id) => {
       const asset = byId.get(id);
       if (!asset) unavailable('MEDIA_NOT_READY', 'errors.media_not_ready');
-      return projectMedia(
-        asset,
-        locale,
-        cdnOrigin,
-        asset.releaseId,
-      );
+      return projectMedia(asset, locale, cdnOrigin, asset.releaseId);
     });
   }
 
@@ -1651,10 +1784,7 @@ export class PublicContentService {
       assertKeys(target, ['kind', 'url']);
       return {
         kind: 'external' as const,
-        url: externalUrl(
-          requiredString(target.url, 2000),
-          this.production,
-        ),
+        url: externalUrl(requiredString(target.url, 2000), this.production),
       };
     }
     return unavailable();
@@ -1699,6 +1829,11 @@ export class PublicContentService {
     }
     const route = routeRegistry.find((item) => item.id === target.routeId);
     if (!route) unavailable('ROUTE_CONFLICT', 'errors.route_unavailable');
+    if (
+      ['R002', 'R003', 'R004', 'R005', 'R006', 'R007'].includes(target.routeId)
+    ) {
+      return { label, url: routeUrl(route[locale], this.siteOrigin()) };
+    }
     const storeCode =
       target.routeId === 'R065'
         ? 'sofia'
@@ -1732,9 +1867,7 @@ export class PublicContentService {
         },
         select: { url: true },
       });
-      return policy
-        ? { label, url: this.policyUrl(policy.url) }
-        : null;
+      return policy ? { label, url: this.policyUrl(policy.url) } : null;
     }
     const path = route[locale];
     const current = await transaction.publicRoute.findFirst({
@@ -1763,9 +1896,7 @@ export class PublicContentService {
         locale,
         null,
       );
-      return products[0]
-        ? { label, url: products[0].summary.url }
-        : null;
+      return products[0] ? { label, url: products[0].summary.url } : null;
     }
     if (current.contentId) {
       const content = await this.contentSummary(
@@ -1830,7 +1961,10 @@ export class PublicContentService {
         select: { code: true, publicData: true },
       });
       return row
-        ? { kind: 'store', value: await this.storeDto(transaction, row, locale) }
+        ? {
+            kind: 'store',
+            value: await this.storeDto(transaction, row, locale),
+          }
         : null;
     }
     if (!label) unavailable();
@@ -1840,12 +1974,7 @@ export class PublicContentService {
           kind: 'external' as const,
           url: externalUrl(link.externalUrl ?? '', this.production),
         };
-    const value = await this.resolveTarget(
-      transaction,
-      target,
-      label,
-      locale,
-    );
+    const value = await this.resolveTarget(transaction, target, label, locale);
     return value ? { kind: 'link', value } : null;
   }
 
@@ -1919,11 +2048,7 @@ export class PublicContentService {
   }
 
   private siteOrigin(): URL {
-    return configurationUrl(
-      this.config,
-      'PUBLIC_SITE_ORIGIN',
-      this.production,
-    );
+    return configurationUrl(this.config, 'PUBLIC_SITE_ORIGIN', this.production);
   }
 
   private get production(): boolean {

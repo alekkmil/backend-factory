@@ -97,7 +97,19 @@ type ProductRow = Prisma.ProductGetPayload<{ select: typeof PRODUCT_SELECT }>;
 type ProductRevisionRow = NonNullable<ProductRow['currentRevisionIdRelation']>;
 type RevisionImageRow =
   ProductRevisionRow['from_RevisionImage_revisionId'][number];
-type MediaAssetRow = RevisionImageRow['assetIdRelation'];
+type MediaAssetRow = Pick<
+  Prisma.MediaAssetGetPayload<Record<string, never>>,
+  | 'id'
+  | 'releaseId'
+  | 'logicalImageId'
+  | 'role'
+  | 'derivatives'
+  | 'altBg'
+  | 'altEn'
+  | 'processedWithAi'
+  | 'onModelIllustrative'
+  | 'reviewStatus'
+>;
 
 interface PublicMedia {
   id: string;
@@ -129,13 +141,15 @@ export interface ProductSummary {
 
 interface ProductDetail extends ProductSummary {
   description: string;
-  materials: {
-    material_code: string;
-    material_label: string;
-    fineness_code: string | null;
-    fineness_label: string | null;
-    gold_karat_code: string | null;
-  }[] | null;
+  materials:
+    | {
+        material_code: string;
+        material_label: string;
+        fineness_code: string | null;
+        fineness_label: string | null;
+        gold_karat_code: string | null;
+      }[]
+    | null;
   gemstones: { code: string; label: string }[] | null;
   media: PublicMedia[];
   stock_choices: {
@@ -257,8 +271,11 @@ export function readDerivative(value: Prisma.JsonValue): Derivative {
   }
   if (
     ![200, 400, 800, 1600].includes(value.size) ||
-    value.width !== value.size ||
-    value.height !== value.size ||
+    value.width < 1 ||
+    value.width > value.size ||
+    value.height < 1 ||
+    value.height > value.size ||
+    Math.max(value.width, value.height) !== value.size ||
     value.mime !== 'image/webp' ||
     value.colour_space !== 'sRGB' ||
     value.bytes < 1 ||
@@ -313,9 +330,7 @@ export function projectMedia(
       message_key: 'errors.media_not_ready',
     });
   }
-  const derivatives = asset.derivatives.map((item) =>
-    readDerivative(item),
-  );
+  const derivatives = asset.derivatives.map((item) => readDerivative(item));
   const bySize = new Map(derivatives.map((item) => [item.size, item]));
   if (
     derivatives.length !== 4 ||
@@ -370,9 +385,7 @@ export function projectMedia(
   };
 }
 
-function commercialProduct(
-  product: ProductRow,
-): CommercialProductInput {
+function commercialProduct(product: ProductRow): CommercialProductInput {
   const revision = product.currentRevisionIdRelation;
   if (!revision) {
     throw new ServiceUnavailableException({
@@ -489,8 +502,18 @@ export class ProductReadService {
     try {
       return await this.prisma.$transaction(
         async (transaction) => {
-          const candidates = await this.catalogCandidates(transaction, uniqueIds, locale, null);
-          const byId = new Map(candidates.map((candidate) => [candidate.summary.id, candidate.summary]));
+          const candidates = await this.catalogCandidates(
+            transaction,
+            uniqueIds,
+            locale,
+            null,
+          );
+          const byId = new Map(
+            candidates.map((candidate) => [
+              candidate.summary.id,
+              candidate.summary,
+            ]),
+          );
           const items = uniqueIds.map((id) => {
             const product = byId.get(id.toLowerCase());
             return product
@@ -581,7 +604,11 @@ export class ProductReadService {
     });
 
     const production = this.config.get<string>('NODE_ENV') === 'production';
-    const origin = configurationUrl(this.config, 'PUBLIC_SITE_ORIGIN', production);
+    const origin = configurationUrl(
+      this.config,
+      'PUBLIC_SITE_ORIGIN',
+      production,
+    );
     const cdnOrigin = configurationUrl(
       this.config,
       'MEDIA_CDN_BASE_URL',
@@ -629,12 +656,7 @@ export class ProductReadService {
         cdnOrigin,
       };
       candidates.push({
-        summary: await this.projectSummary(
-          transaction,
-          data,
-          locale,
-          context,
-        ),
+        summary: await this.projectSummary(transaction, data, locale, context),
         product: commercialProduct(product),
         settings: settingsInput,
         units: commercialUnits(productStocks),
@@ -659,7 +681,12 @@ export class ProductReadService {
     for (const locale of ['bg', 'en'] as const) {
       await this.projectSummary(transaction, data, locale, null);
       for (const image of data.revision.from_RevisionImage_revisionId) {
-        projectMedia(image.assetIdRelation, locale, data.cdnOrigin, data.revision.mediaReleaseId);
+        projectMedia(
+          image.assetIdRelation,
+          locale,
+          data.cdnOrigin,
+          data.revision.mediaReleaseId,
+        );
       }
     }
   }
@@ -712,7 +739,11 @@ export class ProductReadService {
 
     const routeMap = new Map(routes.map((route) => [route.locale, route.path]));
     const production = this.config.get<string>('NODE_ENV') === 'production';
-    const origin = configurationUrl(this.config, 'PUBLIC_SITE_ORIGIN', production);
+    const origin = configurationUrl(
+      this.config,
+      'PUBLIC_SITE_ORIGIN',
+      production,
+    );
     const cdnOrigin = configurationUrl(
       this.config,
       'MEDIA_CDN_BASE_URL',
@@ -826,12 +857,7 @@ export class ProductReadService {
       );
       if (relatedData) {
         relatedProducts.push(
-          await this.projectSummary(
-            transaction,
-            relatedData,
-            locale,
-            context,
-          ),
+          await this.projectSummary(transaction, relatedData, locale, context),
         );
       }
     }
@@ -848,8 +874,7 @@ export class ProductReadService {
         first_published_at:
           translation.firstPublishedAt?.toISOString() ??
           translation.firstPublishedDate,
-        public_modified_at:
-          translation.publicModifiedAt?.toISOString() ?? null,
+        public_modified_at: translation.publicModifiedAt?.toISOString() ?? null,
       },
     };
   }
