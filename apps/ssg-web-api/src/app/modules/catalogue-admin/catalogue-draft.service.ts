@@ -12,6 +12,9 @@ import { TransactionService } from '../../common/transactions/transaction.servic
 import type { AdminProduct, ProductDraft } from './catalogue-admin.dto';
 import { CatalogueSaveDraftDto } from './catalogue-admin.dto';
 import { CatalogueAdminService, cloneProductRevisionToDraft } from './catalogue-admin.service';
+import {
+  parseSpecifications, specificationDictionary, specificationsJson,
+} from '../../common/jewellery-specifications';
 
 type NormalizedDraft = ProductDraft;
 
@@ -31,6 +34,9 @@ function normalizedText(value: string | null, maximum: number): string | null {
 
 function normalizeDraft(input: CatalogueSaveDraftDto['draft']): NormalizedDraft {
   const draft: NormalizedDraft = {
+    ...(input.specifications === undefined ? {} : {
+      specifications: parseSpecifications(input.specifications),
+    }),
     product_type: input.product_type,
     jewellery_type: input.jewellery_type?.normalize('NFC').trim() || null,
     name_bg: normalizedText(input.name_bg, 250),
@@ -99,7 +105,13 @@ export class CatalogueDraftService {
           payload: {
             expected_version: request.expected_version,
             confirm_archive_exit: request.confirm_archive_exit ?? false,
-            draft,
+            draft: {
+              ...draft,
+              ...(draft.specifications === undefined ? {} : {
+                specifications: draft.specifications
+                  ? specificationsJson(draft.specifications) : null,
+              }),
+            },
           },
         }, async () => {
           const locks = await this.transactions.lockProducts(transaction, [productId]);
@@ -122,6 +134,9 @@ export class CatalogueDraftService {
             });
           }
           await this.validateDraftReferences(transaction, productId, draft);
+          if (draft.specifications) {
+            await specificationDictionary(transaction, [draft.specifications]);
+          }
 
           const draftRevisions = await transaction.productRevision.findMany({
             where: { productId, state: 'draft' },
@@ -227,6 +242,10 @@ export class CatalogueDraftService {
               mediaReleaseId: draft.media_release_id,
               changeReason: draft.change_reason_code,
               changeNote: draft.change_reason_note,
+              ...(draft.specifications === undefined ? {} : {
+                specifications: draft.specifications === null
+                  ? Prisma.DbNull : specificationsJson(draft.specifications),
+              }),
             },
           });
 

@@ -1352,14 +1352,35 @@ export class PublicContentService {
     if (value === undefined) return [];
     const localized = recordValue(value);
     assertKeys(localized, ['bg', 'en']);
-    const bg = arrayValue(localized.bg, 10);
-    const en = arrayValue(localized.en, 10);
+    const bg = arrayValue(localized.bg, Number.MAX_SAFE_INTEGER);
+    const en = arrayValue(localized.en, Number.MAX_SAFE_INTEGER);
     if (bg.length !== en.length) unavailable();
+    const keys = [bg, en].map(items => items.map(raw => recordValue(raw).key));
+    if (keys.some(items => items.some(key => key !== undefined))) {
+      if (keys.some(items => items.some(key =>
+        typeof key !== 'string' || !/^[A-Za-z0-9_-]{1,80}$/.test(key))) ||
+        new Set(keys[0]).size !== bg.length ||
+        keys[0].some((key, index) => keys[1][index] !== key)) unavailable();
+    }
+    const rawSlides = locale === 'bg' ? bg : en;
+    const requestedIds = rawSlides.flatMap(raw => {
+      const ids = recordValue(raw).product_ids;
+      if (ids === undefined) return [];
+      return arrayValue(ids, Number.MAX_SAFE_INTEGER).map(id => {
+        const parsed = requiredString(id, 36);
+        if (!isUuid(parsed)) unavailable();
+        return parsed;
+      });
+    });
+    const candidates = requestedIds.length
+      ? await this.products.catalogCandidates(transaction, [...new Set(requestedIds)], locale, null)
+      : [];
+    const productsById = new Map(candidates.map(candidate => [candidate.summary.id, candidate.summary]));
     const slides = [];
-    for (const [index, raw] of (locale === 'bg' ? bg : en).entries()) {
+    for (const [index, raw] of rawSlides.entries()) {
       const slide = await this.atField(`hero_slides.${locale}[${index}]`, async () => {
         const source = recordValue(raw);
-        assertKeys(source, ['media_id', 'heading', 'text', 'cta']);
+        assertKeys(source, ['key', 'media_id', 'heading', 'text', 'cta', 'product_ids']);
         const mediaId = requiredString(source.media_id, 36);
         if (!isUuid(mediaId)) unavailable();
         const media = (await this.mediaByIds(transaction, [mediaId], locale))[0];
@@ -1373,11 +1394,22 @@ export class PublicContentService {
           );
           if (!cta) unavailable('LINK_TARGET_UNAVAILABLE', 'errors.validation');
         }
+        const productIds = source.product_ids === undefined
+          ? [] : arrayValue(source.product_ids, Number.MAX_SAFE_INTEGER);
+        if (new Set(productIds).size !== productIds.length) unavailable();
+        const products = productIds.map(id => {
+          if (typeof id !== 'string') unavailable();
+          const product = productsById.get(id);
+          if (!product) unavailable('LINK_TARGET_UNAVAILABLE', 'errors.validation');
+          return product;
+        });
         return {
+          key: typeof source.key === 'string' ? source.key : null,
           media,
           heading: nullableString(source.heading, 255),
           text: nullableString(source.text, 3000),
           cta,
+          products,
         };
       });
       slides.push(slide);

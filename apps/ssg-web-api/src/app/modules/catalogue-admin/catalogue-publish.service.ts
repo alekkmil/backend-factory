@@ -209,7 +209,7 @@ export class CataloguePublishService {
 
   private async changedRevision(transaction: Prisma.TransactionClient, oldId: string, newId: string): Promise<boolean> {
     const select = {
-      jewelleryTypeId: true, materialsState: true, gemstonesState: true,
+      jewelleryTypeId: true, materialsState: true, gemstonesState: true, specifications: true,
       salesMode: true, priceVisibility: true, fulfilmentMethods: true,
       deliveryScope: true, deliveryLocalityIds: true, pickupLocationCodes: true,
       mediaReleaseId: true,

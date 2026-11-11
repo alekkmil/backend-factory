@@ -88,6 +88,7 @@
     { "key": "contentId", "value": "", "type": "string" },
     { "key": "storeCode", "value": "sofia", "type": "string" },
     { "key": "draftJson", "value": "{}", "type": "string" },
+    { "key": "homeSliderJson", "value": "", "type": "string" },
     { "key": "reviewedImagesJson", "value": "[]", "type": "string" },
     { "key": "mediaVersion", "value": "v1", "type": "string" },
     { "key": "mediaReceiptSha256", "value": "", "type": "string" },
@@ -629,7 +630,7 @@
             ],
             "body": { "mode": "raw", "raw": "{\n  \"request_id\": \"{{draftSaveRequestId}}\",\n  \"expected_version\": {{productVersion}},\n  \"draft\": {{draftJson}}\n}", "options": { "raw": { "language": "json" } } },
             "url": "{{baseUrl}}/api/admin/catalogue/{{productId}}/draft",
-            "description": "Set draftJson to the COMPLETE JSON object from current admin detail draft, preserving nullable fields, image IDs and material/gemstone/fulfilment arrays. Empty default is intentionally invalid. Edit desired fields before sending. If there is no draft, supply the complete replacement contract from README. Save never releases changes or changes live routes. Archive exits additionally require confirm_archive_exit:true and a reviewed reason/note."
+            "description": "Set draftJson to the COMPLETE JSON object from current admin detail draft, preserving nullable fields, image IDs and material/gemstone/fulfilment arrays. Optional specifications supports weight_g, repeatable materials and stone_groups, pearl_type_codes, finish_codes, construction_detail_codes, localized construction_details_bg/en, and components keyed/named in BG/EN with their own same piece-level fields. Decimal weights are positive strings or null. Omit specifications to preserve; null clears; a supplied object replaces its components. See README's complete validated wedding-band example and dictionary codes. Empty draftJson is intentionally invalid. If there is no draft, supply the complete replacement contract from README. Save never releases changes or changes live routes. Archive exits additionally require confirm_archive_exit:true and a reviewed reason/note."
           },
           "response": []
         },
@@ -809,6 +810,50 @@
               { "key": "X-CSRF-Token", "value": "{{devStaffCsrfToken}}" }
             ],
             "url": "{{baseUrl}}/api/admin/website/content/{{websiteContentKey}}"
+          },
+          "response": []
+        },
+        {
+          "name": "Replace HOME slider preserving current content",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const get = key => pm.variables.get(key);",
+                  "const stop = message => { pm.execution.skipRequest(); throw new Error(message); };",
+                  "let slides;",
+                  "try { slides = JSON.parse(get('homeSliderJson')); } catch { stop('Set homeSliderJson to {bg:[...],en:[...]} using the README example.'); }",
+                  "if (!slides || !Array.isArray(slides.bg) || !Array.isArray(slides.en) || slides.bg.length !== slides.en.length) stop('Supply equal-length bg/en slide arrays.');",
+                  "pm.sendRequest({",
+                  "  url: get('baseUrl') + '/api/admin/website/content/home', method: 'GET',",
+                  "  header: { Origin: get('frontendOrigin'), 'X-Dev-Staff-Token': get('devStaffAuthToken'), 'X-CSRF-Token': get('devStaffCsrfToken') }",
+                  "}, (error, response) => {",
+                  "  if (error || response.code !== 200) return stop('Cannot fetch current HOME; no write sent.');",
+                  "  const home = response.json();",
+                  "  if (home.type !== 'home' || !home.updated_at || !Array.isArray(home.translations) || home.translations.length !== 2 || !Array.isArray(home.links)) return stop('Unexpected HOME response.');",
+                  "  const payload = { request_id: pm.variables.replaceIn('{{$guid}}'), expected_updated_at: home.updated_at, type: home.type, parent_id: home.parent_id, author_id: home.author_id, special_data: { ...home.special_data, hero_slides: slides }, translations: home.translations, links: home.links };",
+                  "  pm.variables.set('websiteSliderPayload', JSON.stringify(payload));",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PUT",
+            "header": [
+              { "key": "Origin", "value": "{{frontendOrigin}}" },
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "X-Dev-Staff-Token", "value": "{{devStaffAuthToken}}" },
+              { "key": "X-CSRF-Token", "value": "{{devStaffCsrfToken}}" }
+            ],
+            "body": {
+              "mode": "raw", "raw": "{{websiteSliderPayload}}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": "{{baseUrl}}/api/admin/website/content/home",
+            "description": "Set homeSliderJson to the localized {bg:[...],en:[...]} slide object from README. Each slide accepts key, media_id, heading, text, cta and ordered product_ids. Add/remove/reorder full matching keys in both locales; product_ids order is card order. No fixed slide/product count. Empty bg/en arrays remove all slides. Products must be published/translated and media approved. The pre-request GET preserves all current translations, sections and ContentLinks, replacing only special_data.hero_slides with a fresh timestamp/new UUID. In public GET /api/home, find the sections entry with key=hero; its slides[].products contains ordered localized ProductSummary objects. No database migration is needed for slider fields."
           },
           "response": []
         },

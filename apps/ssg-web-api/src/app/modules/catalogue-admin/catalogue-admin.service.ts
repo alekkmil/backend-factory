@@ -7,6 +7,7 @@ import { Prisma } from '../../../generated/prisma/client';
 import type { Locale } from '../../../generated/prisma/enums';
 import { PrismaService } from '../../database/prisma.service';
 import { isGenuineBarcode } from '../../common/stock-facts/barcode';
+import { parseSpecifications, specificationDictionary } from '../../common/jewellery-specifications';
 import type {
   AdminCatalogueList, AdminProduct, CatalogueFieldError, CatalogueListQueryDto, ProductDraft,
 } from './catalogue-admin.dto';
@@ -18,6 +19,7 @@ const TRANSLATIONS_SELECT = {
   locale: true, name: true, description: true,
 } satisfies Prisma.ProductTranslationSelect;
 const REVISION_SELECT = {
+  specifications: true,
   id: true, state: true, jewelleryTypeIdRelation: { select: DICTIONARY_SELECT },
   materialsState: true, gemstonesState: true, salesMode: true, priceVisibility: true,
   fulfilmentMethods: true, deliveryScope: true, deliveryLocalityIds: true,
@@ -89,6 +91,7 @@ export async function cloneProductRevisionToDraft(
       mediaReleaseId: source.mediaReleaseId,
       changeReason: source.changeReason,
       changeNote: source.changeNote,
+      specifications: source.specifications ?? Prisma.DbNull,
     },
   });
   for (const text of source.from_ProductTranslation_revisionId) {
@@ -248,6 +251,14 @@ export class CatalogueAdminService {
         ),
       };
       if (revision && draft) this.validateDraft(product.id, draft, revision, slug, errors);
+      if (draft?.specifications) {
+        try {
+          await specificationDictionary(transaction, [draft.specifications]);
+        } catch (error) {
+          if (!(error instanceof BadRequestException)) throw error;
+          this.fieldError(errors, 'specifications', 'SPECIFICATION_DICTIONARY_INVALID');
+        }
+      }
       const claimed = new Set(product.from_BarcodeIdentity_productId.map((identity) => identity.barcode));
       const verified = new Set(product.from_StockItem_productId.map((stock) => stock.barcode));
       const staged = await this.stagedCount(transaction, product.id, product.ssgId, claimed, verified, errors);
@@ -276,6 +287,7 @@ export class CatalogueAdminService {
       product_type: productType, jewellery_type: revision.jewelleryTypeIdRelation?.code ?? null,
       name_bg: bg?.name ?? null, name_en: en?.name ?? null,
       description_bg: bg?.description ?? null, description_en: en?.description ?? null,
+      specifications: parseSpecifications(revision.specifications),
       materials_state: revision.materialsState,
       materials: revision.from_RevisionMaterial_revisionId.map((material) => ({
         material_code: material.materialIdRelation.code,

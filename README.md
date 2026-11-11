@@ -355,11 +355,21 @@ and `text`; no translation block needs to be inserted, removed or reordered:
 }
 ```
 
-Both locale arrays are required, must have equal lengths, and allow 0-10 slides.
+Both locale arrays are required and must have equal lengths. Slide and product
+counts are variable, not fixed; the existing 10 MiB JSON request-body limit
+still applies. Array order is the display order. Add/remove/reorder matching
+entries in both locales. A stable optional `key` identifies a slide: when keys
+are supplied, every slide in both locales must have a unique key and the same
+key sequence. Old slides without keys remain supported and return `key:null`.
 Each slide requires an approved media UUID and `heading`, `text`, `cta`;
 the last three can be null. Heading/text limits are 255/3000 characters.
 A non-null CTA requires `label` and a supported `target`; public output resolves
-it to `{label,url}`. Public slides return `{media,heading,text,cta}`, with localized
+it to `{label,url}`. Optional `product_ids` is an ordered, duplicate-free list of
+published product UUIDs. Public output returns their localized ProductSummary
+objects in the same order as `products`; omitted/empty lists return `[]`.
+Unavailable/untranslated products reject a write rather than silently dropping
+cards. Removing a slide/product reference never deletes the product or media.
+Public slides return `{key,media,heading,text,cta,products}`, with localized
 alt text, responsive URLs and disclosure flags inside `media`.
 The UUIDs above are the existing uploaded assets, whose illustrative flag is
 false. If they depict illustrative model composites, re-upload with the new
@@ -456,6 +466,68 @@ set it to true for illustrative model composites. `processed_with_ai: true`
 sets `ai_disclosure_required: true`, independently of the illustrative flag.
 Existing approved assets cannot be patched: re-upload their original files
 with a new `request_id` and the correct flags, then replace their references.
+
+#### Editable HOME slider and product cards
+
+An editable slider fragment for `special_data` is shown below (replace the
+product UUIDs with published BG/EN products). This is **not** a complete HOME
+PUT: retain `kind`, `section_keys`, both translations, all eight existing blocks
+and all existing ContentLinks from a fresh admin GET. Use its `updated_at` and
+a new request UUID. Move the entire keyed entries in both arrays to reorder;
+remove an entry from both to remove a slide; reorder `product_ids` independently
+to reorder each slide's cards. Nothing depends on there being two slides or
+two products:
+
+```json
+{
+  "hero_slides": {
+    "bg": [
+      {
+        "key": "collection",
+        "media_id": "a5949919-4673-42fc-a88e-27bf4605c19a",
+        "heading": "Колекция",
+        "text": "Открийте избраните бижута.",
+        "cta": null,
+        "product_ids": ["37836043-8ac9-4fe7-ace6-c2cb125e1472", "2828ae48-88f1-4c08-a874-80dea5824eb0"]
+      },
+      {
+        "key": "rings",
+        "media_id": "ebca9a0a-6ea5-4640-8791-8ce3cace9be0",
+        "heading": "Пръстени",
+        "text": "Намерете своя пръстен.",
+        "cta": { "label": "Пръстени", "target": { "kind": "route", "route_id": "R003" } },
+        "product_ids": []
+      }
+    ],
+    "en": [
+      {
+        "key": "collection",
+        "media_id": "a5949919-4673-42fc-a88e-27bf4605c19a",
+        "heading": "Collection",
+        "text": "Discover selected jewellery.",
+        "cta": null,
+        "product_ids": ["37836043-8ac9-4fe7-ace6-c2cb125e1472", "2828ae48-88f1-4c08-a874-80dea5824eb0"]
+      },
+      {
+        "key": "rings",
+        "media_id": "ebca9a0a-6ea5-4640-8791-8ce3cace9be0",
+        "heading": "Rings",
+        "text": "Find your ring.",
+        "cta": { "label": "Rings", "target": { "kind": "route", "route_id": "R003" } },
+        "product_ids": []
+      }
+    ]
+  }
+}
+```
+
+In Postman, **Replace HOME slider preserving current content** accepts
+`homeSliderJson` as the localized `{bg:[...],en:[...]}` object, fetches current
+HOME, and changes only `special_data.hero_slides` in a full-preservation PUT.
+Set both arrays to `[]` to remove every slide. The sample copy is illustrative,
+not approved website content; existing media disclosure flags remain unchanged.
+
+#### Editorial upload examples
 For example:
 
 ```json
@@ -682,6 +754,161 @@ It returns the complete `AdminProduct`, creating a draft from the released
 revision when needed. Saving never changes live routes or publishes.
 Archive exit requires explicit `confirm_archive_exit:true` plus a reviewed reason
 and note; verification of a barcode alone is not archive-exit authority.
+
+### Structured jewellery specifications
+
+`PATCH /api/admin/catalogue/:id/draft` additionally accepts
+`draft.specifications`. Specifications belong to the revision, not physical
+stock units. The additive `20261111110000_add_jewellery_specifications`
+migration adds nullable JSONB storage, published-revision immutability and
+starter BG/EN dictionary entries. Deploy it through the reviewed migration flow.
+No existing product, stock measurement or website content is backfilled.
+
+- `weight_g` is the overall product weight, not a sum inferred from components.
+  Each component can separately carry its own `weight_g`.
+- `materials` and `stone_groups` are ordered, repeatable arrays. Each stone's
+  type, weight, colour, grade, clarity and shape stay on the same object.
+- `components` have unique stable `key`, `name_bg`, `name_en` and all the same
+  piece-level fields (but no nested components). Use them for women's/men's
+  bands, earrings or other set pieces.
+- Missing scalar values become `null`, never zero. Decimal measurements are
+  positive JSON strings: grams allow three decimal places, carats four.
+  Null means unknown; no component weights or carats are automatically summed.
+- `pearl_type_codes`, `finish_codes`, `construction_detail_codes` are repeatable
+  dictionary references. Optional `construction_details_bg/en` hold additional
+  localized plain text.
+- Omit the whole `specifications` field to preserve it on an existing/cloned
+  draft; send `null` to clear it. A supplied object replaces its entire structured
+  specification, including components. Other legacy draft fields still use the
+  existing full-replacement contract.
+- Existing top-level legacy `materials`/`gemstone_codes` and composition states
+  remain unchanged for backwards compatibility. Catalogue filters/facets use
+  the union of legacy and structured material/stone codes.
+
+Read dictionary choices with `GET /api/dictionaries?locale=bg` and `locale=en`.
+Groups are `material`, `material_colour`, `gold_karat`, `fineness`, `gemstone`,
+`stone_colour`, `stone_grade`, `stone_clarity`, `stone_shape`, `pearl_type`,
+`finish`, `construction_detail`. Codes are case-sensitive; only active existing
+codes are accepted, with `applies_to` checked where the parent material/stone
+is known. The migration adds starter choices, not an exhaustive vocabulary.
+The existing dictionary maintenance mechanism can add more choices.
+
+Complete draft-save example (replace the product URL, `expected_version` and
+request UUID with current values). For an existing draft, copy its current
+fields, image UUIDs and fulfilment configuration instead of replacing them
+with the empty selections below. This example saves an incomplete enquiry-only
+draft; attaching approved product media and explicit publication remain separate:
+
+```json
+{
+  "request_id": "c1ff9866-c746-49f1-933a-25c3a251cf34",
+  "expected_version": 1,
+  "draft": {
+    "product_type": "jewellery",
+    "jewellery_type": "ring",
+    "name_bg": "Комплект брачни халки",
+    "name_en": "Wedding band set",
+    "description_bg": "Описание на комплекта.",
+    "description_en": "Description of the set.",
+    "materials_state": "unknown",
+    "materials": [],
+    "gemstones_state": "unknown",
+    "gemstone_codes": [],
+    "sales_mode": "enquiry_only",
+    "price_visibility": "hidden",
+    "fulfilment_methods": [],
+    "delivery_scope": null,
+    "delivery_locality_ids": [],
+    "pickup_location_codes": [],
+    "media_release_id": null,
+    "image_ids": [],
+    "change_reason_code": null,
+    "change_reason_note": null,
+    "specifications": {
+      "weight_g": "10.250",
+      "materials": [],
+      "stone_groups": [],
+      "pearl_type_codes": [],
+      "finish_codes": [],
+      "construction_detail_codes": [],
+      "components": [
+        {
+          "key": "womens_band",
+          "name_bg": "Дамска халка",
+          "name_en": "Women's band",
+          "weight_g": "4.125",
+          "materials": [
+            { "material_code": "gold", "colour_code": "white", "gold_karat_code": "18", "fineness_code": "gold_750" },
+            { "material_code": "gold", "colour_code": "rose", "gold_karat_code": "18", "fineness_code": "gold_750" }
+          ],
+          "stone_groups": [
+            { "stone_code": "diamond", "carat_weight": "0.2500", "colour_code": "colourless", "grade_code": "G", "clarity_code": "VS1", "shape_code": "round" },
+            { "stone_code": "sapphire", "carat_weight": null, "colour_code": "blue", "grade_code": null, "clarity_code": null, "shape_code": "oval" }
+          ],
+          "pearl_type_codes": [],
+          "finish_codes": ["polished"],
+          "construction_detail_codes": ["solid"],
+          "construction_details_bg": "Двуцветна халка.",
+          "construction_details_en": "Two-tone band."
+        },
+        {
+          "key": "mens_band",
+          "name_bg": "Мъжка халка",
+          "name_en": "Men's band",
+          "weight_g": null,
+          "materials": [
+            { "material_code": "gold", "colour_code": "white", "gold_karat_code": "18", "fineness_code": "gold_750" }
+          ],
+          "stone_groups": [],
+          "pearl_type_codes": [],
+          "finish_codes": ["brushed"],
+          "construction_detail_codes": [],
+          "construction_details_bg": null,
+          "construction_details_en": null
+        }
+      ]
+    }
+  }
+}
+```
+
+For pearl jewellery, for example set `pearl_type_codes:["akoya"]` on the product
+or the relevant component. Measurements and all other fields may remain unknown.
+The Postman draft-save request also accepts this full contract in `draftJson`.
+
+Public product detail, catalogue, product-batch, related-product and HOME slider
+product summaries include localized `specifications`. Dictionary references
+project to `{code,label}` objects (`material`, `colour`, `fineness`, `gold_karat`,
+`stone`, `grade`, `clarity`, `shape`); components return localized `name`.
+Measurements remain decimal strings/null; `construction_details` is localized.
+Old products return `specifications:null`. Saving drafts never changes these
+public responses until the normal publish endpoint succeeds.
+
+Catalogue and search accept a URL-encoded JSON `specification_filter`. For
+example, the following catalogue filter requires **one diamond group** with
+VS1 clarity and 0.1-0.5 carats on the women's band; it cannot combine the type
+from one group with the clarity/weight of another:
+
+```sh
+curl --get "$BASE_URL/api/catalog" \
+  --data-urlencode 'locale=en' \
+  --data-urlencode 'specification_filter={"component_key":"womens_band","stone":{"stone_code":"diamond","clarity_code":"VS1","carat_min":"0.1","carat_max":"0.5"}}'
+```
+
+Supported filter fields: `weight_g_min/max` (overall product weight only),
+`component_key`, `material` (any material-entry code fields), `stone` (any
+stone-group fields plus `carat_min/max`), `pearl_type_codes`, `finish_codes`,
+`construction_detail_codes`. Min/max are inclusive and unknown measurements
+do not match a range. Material constraints match one material entry; stone
+constraints match one group. When both are supplied they must match the same
+piece. Arrays use OR within the field and AND across fields.
+Existing `material_codes`/`gemstone_codes` still match any component and appear
+in catalogue facets alongside the new specification dictionary groups.
+
+`GET /api/search?locale=en&q=...` also matches localized specification labels,
+codes, component names, measurements and construction text. Supply the same
+`specification_filter` to constrain its product results; content results remain
+independent. Empty search queries retain their existing empty-result behavior.
 
 Visibility body: `{request_id,expected_version,publication_status,reason,note}`.
 The requested status is `hidden` or `published`, never `draft`.

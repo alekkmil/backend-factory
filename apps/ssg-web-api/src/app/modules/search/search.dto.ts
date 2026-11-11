@@ -1,12 +1,13 @@
 import { Transform } from 'class-transformer';
 import { IsIn, IsInt, IsString, Max, MaxLength, Min } from 'class-validator';
 import { Locale } from '../../../generated/prisma/enums';
+import { SpecificationQueryDto } from '../../common/jewellery-specifications';
 
 function pageNumber(value: unknown): unknown {
   return typeof value === 'string' && /^\d+$/u.test(value) ? Number(value) : value;
 }
 
-export class SearchQueryDto {
+export class SearchQueryDto extends SpecificationQueryDto {
   @IsIn(Object.values(Locale))
   locale!: Locale;
 

@@ -22,6 +22,11 @@ import type {
   PublicFacts,
 } from '../../common/commercial/commercial-evaluator';
 import { PrismaService } from '../../database/prisma.service';
+import {
+  projectSpecifications, readSpecifications, readSpecificationDictionary,
+  specificationCodes,
+} from '../../common/jewellery-specifications';
+import type { JewellerySpecificationsDto } from '../../common/jewellery-specifications';
 
 const PRODUCT_SELECT = {
   id: true,
@@ -34,6 +39,7 @@ const PRODUCT_SELECT = {
       jewelleryTypeIdRelation: { select: { code: true } },
       materialsState: true,
       gemstonesState: true,
+      specifications: true,
       salesMode: true,
       priceVisibility: true,
       fulfilmentMethods: true,
@@ -129,6 +135,7 @@ interface PublicMedia {
 }
 
 export interface ProductSummary {
+  specifications: ReturnType<typeof projectSpecifications>;
   id: string;
   product_type: ProductType;
   name: string;
@@ -177,6 +184,7 @@ interface StockRow {
 }
 
 interface ProjectedData {
+  specificationDictionary?: Awaited<ReturnType<typeof readSpecificationDictionary>>;
   product: ProductRow;
   revision: NonNullable<ProductRow['currentRevisionIdRelation']>;
   stocks: StockRow[];
@@ -187,6 +195,7 @@ interface ProjectedData {
 }
 
 export interface CatalogProductCandidate {
+  specifications: JewellerySpecificationsDto | null;
   summary: ProductSummary;
   product: CommercialProductInput;
   settings: CommercialSettingsInput | null;
@@ -640,6 +649,12 @@ export class ProductReadService {
       : null;
 
     const candidates: CatalogProductCandidate[] = [];
+    const specifications = new Map(products.map(product => [
+      product.id, readSpecifications(product.currentRevisionIdRelation?.specifications),
+    ]));
+    const dictionary = await readSpecificationDictionary(
+      transaction, [...specifications.values()].flatMap(value => value ? [value] : []),
+    );
     for (const product of products) {
       const revision = product.currentRevisionIdRelation;
       if (!revision) {
@@ -654,19 +669,23 @@ export class ProductReadService {
         routes: routesByProduct.get(product.id) ?? new Map(),
         origin,
         cdnOrigin,
+        specificationDictionary: dictionary,
       };
+      const structured = specifications.get(product.id) ?? null;
+      const codes = structured ? specificationCodes(structured) : [];
       candidates.push({
+        specifications: structured,
         summary: await this.projectSummary(transaction, data, locale, context),
         product: commercialProduct(product),
         settings: settingsInput,
         units: commercialUnits(productStocks),
         jewelleryTypeCode: revision.jewelleryTypeIdRelation?.code ?? null,
-        materialCodes: revision.from_RevisionMaterial_revisionId.map(
+        materialCodes: [...new Set([...revision.from_RevisionMaterial_revisionId.map(
           (entry) => entry.materialIdRelation.code,
-        ),
-        gemstoneCodes: revision.from_RevisionGemstone_revisionId.map(
+        ), ...codes.filter(entry => entry.group === 'material').map(entry => entry.code)])],
+        gemstoneCodes: [...new Set([...revision.from_RevisionGemstone_revisionId.map(
           (entry) => entry.gemstoneIdRelation.code,
-        ),
+        ), ...codes.filter(entry => entry.group === 'gemstone').map(entry => entry.code)])],
       });
     }
     return candidates;
@@ -925,7 +944,11 @@ export class ProductReadService {
       context,
     );
     const routes = new Map(data.routes);
+    const specifications = readSpecifications(data.revision.specifications);
+    const dictionary = data.specificationDictionary ??
+      await readSpecificationDictionary(transaction, specifications ? [specifications] : []);
     return {
+      specifications: projectSpecifications(specifications, dictionary, locale),
       id: data.product.id,
       product_type: data.product.productType,
       name: translation.name,
