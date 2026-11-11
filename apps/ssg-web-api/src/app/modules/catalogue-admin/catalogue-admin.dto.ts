@@ -4,6 +4,7 @@ import {
   IsUUID, Matches, Max, MaxLength, Min, ValidateIf, ValidateNested,
 } from 'class-validator';
 import { PublicationStatus } from '../../../generated/prisma/enums';
+import { JewellerySpecificationsDto } from '../../common/jewellery-specifications';
 import type {
   CompositionState, DeliveryScope, FulfilmentMethod, LocationCode, PriceVisibility,
   ProductType, RestrictionReason, SalesMode, StockStatus,
@@ -75,6 +76,11 @@ export class CatalogueDraftMaterialDto {
 }
 
 export class ProductDraftInputDto {
+  @ValidateIf((_, value: unknown) => value !== undefined && value !== null)
+  @ValidateNested()
+  @Type(() => JewellerySpecificationsDto)
+  specifications?: JewellerySpecificationsDto | null;
+
   @IsIn(['jewellery', 'loose_stone'])
   product_type!: ProductDraft['product_type'];
 
@@ -239,6 +245,7 @@ export interface AdminCatalogueList {
 }
 
 export interface ProductDraft {
+  specifications?: JewellerySpecificationsDto | null;
   product_type: ProductType;
   jewellery_type: string | null;
   name_bg: string | null;

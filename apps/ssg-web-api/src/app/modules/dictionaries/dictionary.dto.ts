@@ -8,6 +8,14 @@ export const PUBLIC_DICTIONARY_GROUPS = [
   'fineness',
   'gold_karat',
   'gemstone',
+  'material_colour',
+  'stone_colour',
+  'stone_grade',
+  'stone_clarity',
+  'stone_shape',
+  'pearl_type',
+  'finish',
+  'construction_detail',
 ] as const;
 
 export class DictionaryQueryDto {

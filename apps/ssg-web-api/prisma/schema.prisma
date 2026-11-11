@@ -370,6 +370,7 @@ model ProductRevision {
   jewelleryTypeId                    String?              @db.Uuid
   materialsState                     CompositionState     @default(unknown)
   gemstonesState                     CompositionState     @default(unknown)
+  specifications                     Json?
   salesMode                          SalesMode            @default(enquiry_only)
   priceVisibility                    PriceVisibility      @default(hidden)
   fulfilmentMethods                  FulfilmentMethod[]   @default([])

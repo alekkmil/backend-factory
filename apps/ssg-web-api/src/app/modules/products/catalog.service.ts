@@ -14,6 +14,10 @@ import { fulfilmentContext } from './fulfilment-context';
 import type { CatalogQueryDto } from './catalog.dto';
 import { ProductReadService } from './product-read.service';
 import type { CatalogProductCandidate, ProductSummary } from './product-read.service';
+import {
+  SPECIFICATION_GROUPS, specificationCodes, specificationFilterMatches,
+  validateSpecificationFilter,
+} from '../../common/jewellery-specifications';
 
 interface CatalogResponse {
   items: ProductSummary[];
@@ -78,6 +82,7 @@ export class CatalogService {
       return await this.prisma.$transaction(
         async (transaction) => {
           await this.validateDictionaryFilters(transaction, query);
+          await validateSpecificationFilter(transaction, query.specification_filter);
           const selectionProductIds = query.selection_id
             ? await this.selectionProducts(
                 transaction,
@@ -101,32 +106,6 @@ export class CatalogService {
                 group: 'jewellery_type',
                 code: query.jewellery_type,
                 active: true,
-              },
-            };
-          }
-          if (query.material_codes?.length) {
-            revisionWhere.from_RevisionMaterial_revisionId = {
-              some: {
-                materialIdRelation: {
-                  is: {
-                    group: 'material',
-                    active: true,
-                    code: { in: query.material_codes },
-                  },
-                },
-              },
-            };
-          }
-          if (query.gemstone_codes?.length) {
-            revisionWhere.from_RevisionGemstone_revisionId = {
-              some: {
-                gemstoneIdRelation: {
-                  is: {
-                    group: 'gemstone',
-                    active: true,
-                    code: { in: query.gemstone_codes },
-                  },
-                },
               },
             };
           }
@@ -282,6 +261,9 @@ export class CatalogService {
       : null;
 
     return candidates.filter((candidate) => {
+      if (!specificationFilterMatches(candidate.specifications, query.specification_filter)) {
+        return false;
+      }
       if (
         (query.product_type &&
           candidate.summary.product_type !== query.product_type) ||
@@ -375,11 +357,19 @@ export class CatalogService {
       for (const code of new Set(candidate.gemstoneCodes)) {
         increment(counts, 'gemstone', code);
       }
+      if (candidate.specifications) {
+        const codes = specificationCodes(candidate.specifications);
+        for (const key of new Set(codes
+          .filter(entry => !['material', 'gemstone'].includes(entry.group))
+          .map(entry => `${entry.group}\u0000${entry.code}`))) {
+          counts.set(key, (counts.get(key) ?? 0) + 1);
+        }
+      }
     }
     const entries = await transaction.dictionaryEntry.findMany({
       where: {
         active: true,
-        group: { in: ['product_type', 'jewellery_type', 'material', 'gemstone'] },
+        group: { in: ['product_type', 'jewellery_type', ...SPECIFICATION_GROUPS] },
       },
       select: {
         group: true,
@@ -389,7 +379,7 @@ export class CatalogService {
       },
       orderBy: [{ group: 'asc' }, { code: 'asc' }],
     });
-    const groups = ['product_type', 'jewellery_type', 'material', 'gemstone'];
+    const groups = ['product_type', 'jewellery_type', ...SPECIFICATION_GROUPS];
     return groups.flatMap((group) => {
       const values = entries.flatMap((entry) => {
         const count = counts.get(`${group}\u0000${entry.code}`);

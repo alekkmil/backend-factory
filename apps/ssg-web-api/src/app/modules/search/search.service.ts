@@ -7,6 +7,10 @@ import { configurationUrl, ProductReadService, routeUrl } from '../products/prod
 import type { ProductSummary } from '../products/product-read.service';
 import { routeRegistry } from '../../common/publication/route-registry';
 import type { SearchQueryDto } from './search.dto';
+import {
+  projectSpecifications, readSpecifications, readSpecificationDictionary,
+  specificationFilterMatches, validateSpecificationFilter,
+} from '../../common/jewellery-specifications';
 
 interface SearchContentSummary {
   id: string;
@@ -37,6 +41,15 @@ function sectionText(value: Prisma.JsonValue): string {
   }).join('\n');
 }
 
+function specificationText(value: unknown): string {
+  if (typeof value === 'string') return value;
+  if (Array.isArray(value)) return value.map(specificationText).join('\n');
+  if (value !== null && typeof value === 'object') {
+    return Object.values(value).map(specificationText).join('\n');
+  }
+  return '';
+}
+
 @Injectable()
 export class SearchService {
   private readonly logger = new Logger(SearchService.name);
@@ -58,17 +71,24 @@ export class SearchService {
     if (!query.q) return response;
     try {
       return await this.prisma.$transaction(async (transaction) => {
+        await validateSpecificationFilter(transaction, query.specification_filter);
         const contains = query.q.replace(/[\\%_]/gu, '\\$&');
+        const specificationIds = await this.specificationProductIds(transaction, query);
+        const textMatch: Prisma.ProductRevisionWhereInput = {
+          from_ProductTranslation_revisionId: { some: {
+            locale: query.locale, OR: [
+              { name: { contains, mode: 'insensitive' } },
+              { description: { contains, mode: 'insensitive' } },
+            ],
+          } },
+        };
         const where: Prisma.ProductWhereInput = {
+            ...(query.specification_filter ? { id: { in: specificationIds.filtered } } : {}),
             publicationStatus: 'published',
             currentRevisionIdRelation: { is: {
               state: 'published',
-              from_ProductTranslation_revisionId: { some: {
-                locale: query.locale, OR: [
-                  { name: { contains, mode: 'insensitive' } },
-                  { description: { contains, mode: 'insensitive' } },
-                ],
-              } },
+              from_ProductTranslation_revisionId: { some: { locale: query.locale } },
+              OR: [textMatch, { productId: { in: specificationIds.text } }],
             } },
           };
         response.products.total = await transaction.product.count({ where });
@@ -104,6 +124,49 @@ export class SearchService {
       }
       throw error;
     }
+  }
+
+  private async specificationProductIds(
+    transaction: Prisma.TransactionClient, query: SearchQueryDto,
+  ): Promise<{ text: string[]; filtered: string[] }> {
+    const ids: { text: string[]; filtered: string[] } = { text: [], filtered: [] };
+    let after: string | undefined;
+    const needle = query.q.toLocaleLowerCase(query.locale);
+    while (true) {
+      const rows = await transaction.product.findMany({
+        where: {
+          id: after ? { gt: after } : undefined,
+          publicationStatus: 'published',
+          currentRevisionIdRelation: { is: {
+            state: 'published',
+            ...(query.specification_filter ? {} : { specifications: { not: Prisma.DbNull } }),
+            from_ProductTranslation_revisionId: { some: { locale: query.locale } },
+          } },
+        },
+        select: { id: true, currentRevisionIdRelation: { select: { specifications: true } } },
+        orderBy: { id: 'asc' }, take: 200,
+      });
+      if (!rows.length) break;
+      const values = rows.map(row => ({
+        id: row.id, specifications: readSpecifications(row.currentRevisionIdRelation?.specifications),
+      }));
+      const dictionary = await readSpecificationDictionary(
+        transaction, values.flatMap(row => row.specifications ? [row.specifications] : []),
+      );
+      for (const row of values) {
+        if (query.specification_filter &&
+          specificationFilterMatches(row.specifications, query.specification_filter)) {
+          ids.filtered.push(row.id);
+        }
+        const publicValue = projectSpecifications(row.specifications, dictionary, query.locale);
+        if (specificationText(publicValue).normalize('NFC').toLocaleLowerCase(query.locale).includes(needle)) {
+          ids.text.push(row.id);
+        }
+      }
+      after = rows.at(-1)?.id;
+      if (rows.length < 200) break;
+    }
+    return ids;
   }
 
   private async contentMatches(

@@ -20,6 +20,7 @@ import {
   LocationCode,
   ProductType,
 } from '../../../generated/prisma/enums';
+import { SpecificationQueryDto } from '../../common/jewellery-specifications';
 
 function normalizeCode(value: unknown): unknown {
   return typeof value === 'string' ? value.trim().normalize('NFC') : value;
@@ -47,7 +48,7 @@ function parsePage(value: unknown, fallback: number): unknown {
   return Number.isSafeInteger(parsed) ? parsed : value;
 }
 
-export class CatalogQueryDto {
+export class CatalogQueryDto extends SpecificationQueryDto {
   @IsIn(Object.values(Locale))
   locale!: Locale;
 
