@@ -8,6 +8,7 @@ import {
   Length,
   Max,
   Min,
+  Matches,
 } from 'class-validator';
 import {
   ContentType,
@@ -47,6 +48,51 @@ export class ContentListQueryDto extends LocaleQueryDto {
   @Min(1)
   @Max(100)
   page_size = 24;
+}
+
+export class PublicationsQueryDto extends LocaleQueryDto {
+  @IsOptional()
+  @IsIn(['stories', 'media'])
+  group?: 'stories' | 'media';
+
+  @IsOptional()
+  @Transform(({ value }) =>
+    value === undefined ? undefined : queryInteger(value, 0),
+  )
+  @IsInt()
+  @Min(1000)
+  @Max(9999)
+  year?: number;
+
+  @IsOptional()
+  @Transform(({ value }) =>
+    typeof value === 'string' ? value.trim().normalize('NFC') : value,
+  )
+  @IsString()
+  @Matches(/^[A-Za-z0-9_-]{1,80}$/u)
+  topic?: string;
+
+  @IsOptional()
+  @Transform(({ value }) =>
+    typeof value === 'string' ? value.trim().normalize('NFC') : value,
+  )
+  @IsString()
+  @Length(1, 200)
+  search?: string;
+
+  @IsOptional()
+  @Transform(({ value }) =>
+    typeof value === 'string' ? value.trim().normalize('NFC') : value,
+  )
+  @IsString()
+  @Length(1, 255)
+  publisher?: string;
+
+  @Transform(({ value }) => queryInteger(value, 1))
+  @IsInt()
+  @Min(1)
+  @Max(Number.MAX_SAFE_INTEGER)
+  page = 1;
 }
 
 export class ContentDetailPathDto {

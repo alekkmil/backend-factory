@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Injectable,
   Logger,
   NotFoundException,
@@ -25,6 +26,7 @@ import { routeRegistry } from '../../common/publication/route-registry';
 import type {
   ContentListQueryDto,
   PolicyQueryDto,
+  PublicationsQueryDto,
   SeoUrlsQueryDto,
 } from './public-content.dto';
 
@@ -89,6 +91,40 @@ interface ContentSummary {
   intro: string | null;
   url: string;
   primary_image: ReturnType<typeof projectMedia> | null;
+}
+
+type PublicationGroup = 'stories' | 'media';
+
+interface PublicationRow {
+  id: string;
+  type: ContentType;
+  specialData: Prisma.JsonValue;
+  from_ContentTranslation_contentId: {
+    locale: Locale;
+    title: string;
+    intro: string | null;
+    sections: Prisma.JsonValue;
+  }[];
+  from_PublicRoute_contentId: { locale: Locale; path: string }[];
+}
+
+interface PublicationValues {
+  group: PublicationGroup;
+  eventAt: string | null;
+  topics: string[];
+  publisher: string | null;
+  showOnHome: boolean;
+  homeOrder: number | null;
+  featured: boolean;
+  pinned: boolean;
+  pinOrder: number | null;
+}
+
+interface PublicationCard extends ContentSummary {
+  group: PublicationGroup;
+  event_at: string | null;
+  topics: string[];
+  publisher: string | null;
 }
 
 interface SeoUrl {
@@ -379,6 +415,398 @@ export class PublicContentService {
     });
   }
 
+  async publications(query: PublicationsQueryDto) {
+    if (query.publisher && query.group !== 'media') {
+      throw new BadRequestException({
+        code: 'PUBLISHER_FILTER_REQUIRES_MEDIA',
+        message_key: 'errors.validation',
+      });
+    }
+    return this.read(async (transaction) => {
+      const eligible = await this.publicationRows(transaction, query.locale);
+      const metadata = new Map(
+        eligible.map((row) => [row.id, this.publicationValues(row)]),
+      );
+      const filters = this.availablePublicationFilters(eligible, metadata);
+      const search = query.search
+        ?.normalize('NFC')
+        .toLocaleLowerCase(query.locale);
+      const filtered = eligible.filter((row) => {
+        const values = metadata.get(row.id);
+        if (!values) return false;
+        const translation = row.from_ContentTranslation_contentId[0];
+        if (!translation) return false;
+        if (query.group && values.group !== query.group) return false;
+        if (query.year && values.eventAt?.slice(0, 4) !== String(query.year)) {
+          return false;
+        }
+        if (query.topic && !values.topics.includes(query.topic)) return false;
+        if (
+          query.publisher &&
+          values.publisher?.toLocaleLowerCase(query.locale) !==
+            query.publisher.toLocaleLowerCase(query.locale)
+        ) {
+          return false;
+        }
+        if (
+          search &&
+          !`${translation.title}\n${translation.intro ?? ''}`
+            .normalize('NFC')
+            .toLocaleLowerCase(query.locale)
+            .includes(search)
+        ) {
+          return false;
+        }
+        return true;
+      });
+      filtered.sort((left, right) => this.comparePublicationDate(left, right));
+      const start = (query.page - 1) * 12;
+      const page = filtered.slice(start, start + 12);
+      return {
+        items: await this.projectPublicationCards(
+          transaction,
+          page,
+          query.locale,
+          metadata,
+        ),
+        total: filtered.length,
+        page: query.page,
+        page_size: 12,
+        total_pages: Math.ceil(filtered.length / 12),
+        available_filters: filters,
+      };
+    });
+  }
+
+  async publicationLanding(locale: Locale) {
+    return this.read(async (transaction) => {
+      const rows = await this.publicationRows(transaction, locale);
+      const metadata = new Map(
+        rows.map((row) => [row.id, this.publicationValues(row)]),
+      );
+      const byNewest = [...rows].sort((left, right) =>
+        this.comparePublicationDate(left, right),
+      );
+      const selectedLead = rows.find(
+        (row) => metadata.get(row.id)?.featured === true,
+      );
+      const lead = selectedLead ?? byNewest[0] ?? null;
+      const leadId = lead?.id;
+      const stories = rows
+        .filter(
+          (row) =>
+            row.id !== leadId &&
+            metadata.get(row.id)?.group === 'stories',
+        )
+        .sort((left, right) => this.comparePinnedPublications(left, right))
+        .slice(0, 2);
+      const media = rows
+        .filter(
+          (row) =>
+            row.id !== leadId && metadata.get(row.id)?.group === 'media',
+        )
+        .sort((left, right) => this.comparePinnedPublications(left, right))
+        .slice(0, 3);
+      const cards = await this.projectPublicationCards(
+        transaction,
+        [...(lead ? [lead] : []), ...stories, ...media],
+        locale,
+        metadata,
+      );
+      const cardById = new Map(cards.map((card) => [card.id, card]));
+      return {
+        locale,
+        lead: lead ? (cardById.get(lead.id) ?? null) : null,
+        stories: stories.flatMap((row) => {
+          const card = cardById.get(row.id);
+          return card ? [card] : [];
+        }),
+        media: media.flatMap((row) => {
+          const card = cardById.get(row.id);
+          return card ? [card] : [];
+        }),
+      };
+    });
+  }
+
+  private isPublicationType(type: ContentType): boolean {
+    return type === 'article' || type === 'case_study' || type === 'press';
+  }
+
+  private async publicationRows(
+    transaction: ReadTransaction,
+    locale: Locale,
+  ): Promise<PublicationRow[]> {
+    return transaction.contentRecord.findMany({
+      where: {
+        type: { in: ['article', 'case_study', 'press'] },
+        from_ContentTranslation_contentId: {
+          some: { locale, published: true },
+        },
+        from_PublicRoute_contentId: {
+          some: { locale, state: 'current' },
+        },
+      },
+      select: {
+        id: true,
+        type: true,
+        specialData: true,
+        from_ContentTranslation_contentId: {
+          where: { locale, published: true },
+          select: { locale: true, title: true, intro: true, sections: true },
+        },
+        from_PublicRoute_contentId: {
+          where: { locale, state: 'current' },
+          select: { locale: true, path: true },
+        },
+      },
+    });
+  }
+
+  private publicationValues(row: PublicationRow): PublicationValues {
+    const special = recordValue(row.specialData);
+    if (special.kind !== row.type) unavailable();
+    assertKeys(
+      special,
+      row.type === 'press'
+        ? [
+            'kind',
+            'group',
+            'publisher',
+            'event_at',
+            'sources',
+            'show_on_home',
+            'home_order',
+            'is_featured',
+            'is_pinned',
+            'pin_order',
+            'topics',
+          ]
+        : [
+            'kind',
+            'group',
+            'event_at',
+            'sources',
+            'evidence_ref',
+            'show_on_home',
+            'home_order',
+            'is_featured',
+            'is_pinned',
+            'pin_order',
+            'topics',
+          ],
+    );
+    if (special.group !== 'stories' && special.group !== 'media') {
+      unavailable();
+    }
+    const group: PublicationGroup = special.group;
+    if (
+      (row.type === 'press' && group !== 'media') ||
+      (row.type !== 'press' && group !== 'stories')
+    ) {
+      unavailable();
+    }
+    const eventAt =
+      special.event_at === null ? null : this.dateValue(special.event_at);
+    const topics = arrayValue(special.topics, 30).map((topic) =>
+      requiredString(topic, 80),
+    );
+    if (new Set(topics).size !== topics.length) unavailable();
+    const showOnHome = special.show_on_home;
+    const featured = special.is_featured;
+    const pinned = special.is_pinned;
+    if (
+      typeof showOnHome !== 'boolean' ||
+      typeof featured !== 'boolean' ||
+      typeof pinned !== 'boolean'
+    ) {
+      unavailable();
+    }
+    const homeOrder = special.home_order;
+    if (
+      homeOrder !== null &&
+      (typeof homeOrder !== 'number' ||
+        !Number.isSafeInteger(homeOrder) ||
+        homeOrder < 1 ||
+        homeOrder > 3)
+    ) {
+      unavailable();
+    }
+    const pinOrder = special.pin_order;
+    if (
+      pinOrder !== null &&
+      (typeof pinOrder !== 'number' ||
+        !Number.isSafeInteger(pinOrder) ||
+        pinOrder < 1)
+    ) {
+      unavailable();
+    }
+    if ((showOnHome && homeOrder === null) || (!showOnHome && homeOrder !== null)) {
+      unavailable();
+    }
+    if ((pinned && pinOrder === null) || (!pinned && pinOrder !== null)) {
+      unavailable();
+    }
+    const publisher =
+      group === 'media' ? requiredString(special.publisher, 255) : null;
+    return {
+      group,
+      eventAt,
+      topics,
+      publisher,
+      showOnHome,
+      homeOrder,
+      featured,
+      pinned,
+      pinOrder,
+    };
+  }
+
+  private availablePublicationFilters(
+    rows: PublicationRow[],
+    metadata: Map<string, PublicationValues>,
+  ) {
+    const groups = new Set<PublicationGroup>();
+    const years = new Set<string>();
+    const topics = new Set<string>();
+    const publishers = new Set<string>();
+    for (const row of rows) {
+      const values = metadata.get(row.id);
+      if (!values) continue;
+      groups.add(values.group);
+      if (values.eventAt) years.add(values.eventAt.slice(0, 4));
+      values.topics.forEach((topic) => topics.add(topic));
+      if (values.publisher) publishers.add(values.publisher);
+    }
+    return {
+      groups: [...groups].sort(),
+      years: [...years].sort((left, right) => right.localeCompare(left)),
+      topics: [...topics].sort(),
+      publishers: [...publishers].sort((left, right) => left.localeCompare(right)),
+    };
+  }
+
+  private comparePublicationDate(
+    left: PublicationRow,
+    right: PublicationRow,
+  ): number {
+    const leftDate = this.publicationValues(left).eventAt;
+    const rightDate = this.publicationValues(right).eventAt;
+    if (leftDate === null && rightDate !== null) return 1;
+    if (leftDate !== null && rightDate === null) return -1;
+    return (
+      (rightDate ?? '').localeCompare(leftDate ?? '') ||
+      left.id.localeCompare(right.id)
+    );
+  }
+
+  private comparePinnedPublications(
+    left: PublicationRow,
+    right: PublicationRow,
+  ): number {
+    const leftValues = this.publicationValues(left);
+    const rightValues = this.publicationValues(right);
+    if (leftValues.pinned !== rightValues.pinned) {
+      return leftValues.pinned ? -1 : 1;
+    }
+    if (leftValues.pinned && rightValues.pinned) {
+      const orderDifference =
+        (leftValues.pinOrder ?? Number.MAX_SAFE_INTEGER) -
+        (rightValues.pinOrder ?? Number.MAX_SAFE_INTEGER);
+      if (orderDifference) return orderDifference;
+    }
+    return this.comparePublicationDate(left, right);
+  }
+
+  private async projectPublicationCards(
+    transaction: ReadTransaction,
+    rows: PublicationRow[],
+    locale: Locale,
+    suppliedMetadata?: Map<string, PublicationValues>,
+  ): Promise<PublicationCard[]> {
+    const imageIds = rows.flatMap((row) => {
+      const translation = row.from_ContentTranslation_contentId[0];
+      const imageId = translation
+        ? this.firstImageId(translation.sections)
+        : null;
+      return imageId ? [imageId] : [];
+    });
+    const media = await this.mediaByIds(
+      transaction,
+      [...new Set(imageIds)],
+      locale,
+    );
+    const mediaById = new Map(media.map((item) => [item.id, item]));
+    const origin = this.siteOrigin();
+    return rows.map((row) => {
+      const values =
+        suppliedMetadata?.get(row.id) ?? this.publicationValues(row);
+      const translation = row.from_ContentTranslation_contentId[0];
+      const route = row.from_PublicRoute_contentId[0];
+      if (!translation || !route) unavailable();
+      const imageId = this.firstImageId(translation.sections);
+      return {
+        ...contentSummaryFrom(
+          row,
+          locale,
+          origin,
+          imageId ? (mediaById.get(imageId) ?? null) : null,
+        ),
+        group: values.group,
+        event_at: values.eventAt,
+        topics: values.topics,
+        publisher: values.publisher,
+      };
+    });
+  }
+
+  private async relatedPublications(
+    transaction: ReadTransaction,
+    currentId: string,
+    current: PublicationValues,
+    selectedIds: string[],
+    locale: Locale,
+  ): Promise<PublicationCard[]> {
+    const candidates = await this.publicationRows(transaction, locale);
+    const metadata = new Map(
+      candidates.map((row) => [row.id, this.publicationValues(row)]),
+    );
+    const byId = new Map(candidates.map((row) => [row.id, row]));
+    const result: PublicationRow[] = [];
+    const seen = new Set([currentId]);
+    const append = (row: PublicationRow | undefined) => {
+      if (!row || seen.has(row.id)) return;
+      if (metadata.get(row.id)?.group !== current.group) return;
+      seen.add(row.id);
+      result.push(row);
+    };
+    for (const id of selectedIds) append(byId.get(id));
+    const topical = candidates
+      .filter((row) => {
+        const values = metadata.get(row.id);
+        return (
+          row.id !== currentId &&
+          values?.group === current.group &&
+          values.topics.some((topic) => current.topics.includes(topic))
+        );
+      })
+      .sort((left, right) => this.comparePublicationDate(left, right));
+    topical.forEach(append);
+    candidates
+      .filter(
+        (row) => row.id !== currentId && metadata.get(row.id)?.group === current.group,
+      )
+      .sort((left, right) => this.comparePublicationDate(left, right))
+      .forEach(append);
+    const selected = result.slice(0, 2);
+    return this.projectPublicationCards(
+      transaction,
+      selected,
+      locale,
+      metadata,
+    );
+  }
+
   async contentDetail(id: string, locale: Locale) {
     return this.read((transaction) =>
       this.contentDetailInTransaction(transaction, id, locale),
@@ -453,6 +881,19 @@ export class PublicContentService {
         labelEn: true,
       },
     });
+    const storyRows = (await this.publicationRows(transaction, locale))
+      .filter((row) => this.publicationValues(row).showOnHome)
+      .sort((left, right) => {
+        const orderDifference =
+          (this.publicationValues(left).homeOrder ?? Number.MAX_SAFE_INTEGER) -
+          (this.publicationValues(right).homeOrder ?? Number.MAX_SAFE_INTEGER);
+        return orderDifference || left.id.localeCompare(right.id);
+      });
+    const storyCards = await this.projectPublicationCards(
+      transaction,
+      storyRows,
+      locale,
+    );
     const sections = [];
     for (const key of HOME_SECTIONS) {
       const contentRecords: object[] = [];
@@ -473,9 +914,10 @@ export class PublicContentService {
                 some: { locale, state: 'current' },
               },
             },
-            select: { id: true },
+            select: { id: true, type: true },
           });
           if (!record) continue;
+          if (key === 'stories' && this.isPublicationType(record.type)) continue;
           const detail = await this.atField(
             `links[${linkIndex}].target`,
             () => this.contentDetailInTransaction(transaction, record.id, locale),
@@ -512,6 +954,7 @@ export class PublicContentService {
         records: contentRecords,
         stores: storeItems,
         links: resolved,
+        ...(key === 'stories' ? { articles: storyCards } : {}),
       });
     }
     return { locale, sections };
@@ -1196,7 +1639,9 @@ export class PublicContentService {
       .slice(0, 50);
     const relatedLinks = contentRelatedIds.length
       ? contentRelatedIds.map((relatedProductId) => ({ relatedProductId }))
-      : await transaction.productRelatedLink.findMany({
+      : this.isPublicationType(record.type)
+        ? []
+        : await transaction.productRelatedLink.findMany({
           where: { productId: id },
           orderBy: [{ sortOrder: 'asc' }, { id: 'asc' }],
           take: 50,
@@ -1204,7 +1649,7 @@ export class PublicContentService {
         });
     const relatedProductIds = [
       ...new Set(relatedLinks.map((link) => link.relatedProductId)),
-    ];
+    ].slice(0, 3);
     const candidates = await this.products.catalogCandidates(
       transaction,
       relatedProductIds,
@@ -1218,6 +1663,40 @@ export class PublicContentService {
       const candidate = candidateById.get(relatedProductId);
       return candidate ? [candidate] : [];
     });
+    const isPublication = this.isPublicationType(record.type);
+    const editorialValues = isPublication
+      ? this.publicationValues({
+          id: record.id,
+          type: record.type,
+          specialData: record.specialData,
+          from_ContentTranslation_contentId: [],
+          from_PublicRoute_contentId: [],
+        })
+      : null;
+    const relatedArticles = editorialValues
+      ? await this.relatedPublications(
+          transaction,
+          record.id,
+          editorialValues,
+          record.from_ContentLink_ownerContentId
+            .filter(
+              (link) =>
+                link.slot === 'related_articles' && link.targetContentId,
+            )
+            .flatMap((link) =>
+              link.targetContentId ? [link.targetContentId] : [],
+            ),
+          locale,
+        )
+      : [];
+    const aboutLink = isPublication
+      ? record.from_ContentLink_ownerContentId.find(
+          (link) => link.slot === 'about',
+        )
+      : undefined;
+    const aboutResult = aboutLink
+      ? await this.resolveStoredLink(transaction, aboutLink, locale)
+      : null;
     const publishedLocales = new Set(
       record.from_ContentTranslation_contentId.map((item) => item.locale),
     );
@@ -1232,6 +1711,13 @@ export class PublicContentService {
       special,
       children,
       related_products: relatedProducts,
+      ...(isPublication
+        ? {
+            related_articles: relatedArticles,
+            about:
+              aboutResult?.kind === 'link' ? aboutResult.value : null,
+          }
+        : {}),
       alternate_urls: {
         bg: routeMap.has('bg')
           ? routeUrl(routeMap.get('bg') ?? '', origin)
@@ -1288,6 +1774,52 @@ export class PublicContentService {
           () => this.projectSections(transaction, [section], translation.locale, true),
         );
       }
+    }
+  }
+
+  async validatePublicationSelections(
+    transaction: ReadTransaction,
+  ): Promise<void> {
+    const records = await transaction.contentRecord.findMany({
+      where: { type: { in: ['article', 'case_study', 'press'] } },
+      select: { id: true, type: true, specialData: true },
+    });
+    const values = records.map((record) =>
+      this.publicationValues({
+        ...record,
+        from_ContentTranslation_contentId: [],
+        from_PublicRoute_contentId: [],
+      }),
+    );
+    const home = values.filter((value) => value.showOnHome);
+    if (home.length > 3) {
+      throw new BadRequestException({
+        code: 'HOME_ARTICLE_SELECTION_LIMIT',
+        message_key: 'errors.validation',
+      });
+    }
+    if (new Set(home.map((value) => value.homeOrder)).size !== home.length) {
+      throw new BadRequestException({
+        code: 'HOME_ARTICLE_ORDER_DUPLICATE',
+        message_key: 'errors.validation',
+      });
+    }
+    if (values.filter((value) => value.featured).length > 1) {
+      throw new BadRequestException({
+        code: 'FEATURED_ARTICLE_LIMIT',
+        message_key: 'errors.validation',
+      });
+    }
+    const pinPositions = new Set<string>();
+    for (const value of values.filter((item) => item.pinned)) {
+      const position = `${value.group}:${value.pinOrder}`;
+      if (pinPositions.has(position)) {
+        throw new BadRequestException({
+          code: 'PIN_ORDER_DUPLICATE',
+          message_key: 'errors.validation',
+        });
+      }
+      pinPositions.add(position);
     }
   }
 
@@ -1450,6 +1982,8 @@ export class PublicContentService {
           kind: 'faq';
           items: { question: string; answer: string; links: ResolvedLink[] }[];
         }
+      | { kind: 'sources' }
+      | { kind: 'about' }
     )[] = [];
     for (const value of rawSections) {
       const section = recordValue(value);
@@ -1562,6 +2096,9 @@ export class PublicContentService {
           });
         }
         sections.push({ kind, items });
+      } else if (kind === 'sources' || kind === 'about') {
+        assertKeys(section, ['kind']);
+        sections.push({ kind });
       } else {
         unavailable();
       }
@@ -1652,7 +2189,26 @@ export class PublicContentService {
       };
     }
     if (type === 'article' || type === 'case_study') {
-      assertKeys(special, ['kind', 'event_at', 'sources', 'evidence_ref']);
+      const editorial = this.publicationValues({
+        id: '',
+        type,
+        specialData: value,
+        from_ContentTranslation_contentId: [],
+        from_PublicRoute_contentId: [],
+      });
+      assertKeys(special, [
+        'kind',
+        'group',
+        'event_at',
+        'sources',
+        'evidence_ref',
+        'show_on_home',
+        'home_order',
+        'is_featured',
+        'is_pinned',
+        'pin_order',
+        'topics',
+      ]);
       if (
         special.evidence_ref !== null &&
         (typeof special.evidence_ref !== 'string' ||
@@ -1668,23 +2224,47 @@ export class PublicContentService {
         author = await this.contentSummary(transaction, authorId, locale);
         if (author && author.type !== 'author') unavailable();
       }
-      const eventAt =
-        special.event_at === null ? null : this.dateValue(special.event_at);
-      return { kind: type, author, event_at: eventAt, sources };
-    }
-    if (type === 'press') {
-      assertKeys(special, ['kind', 'publisher', 'source_url', 'source_date']);
       return {
         kind: type,
+        group: editorial.group,
+        author,
+        event_at: editorial.eventAt,
+        topics: editorial.topics,
+        sources,
+      };
+    }
+    if (type === 'press') {
+      const editorial = this.publicationValues({
+        id: '',
+        type,
+        specialData: value,
+        from_ContentTranslation_contentId: [],
+        from_PublicRoute_contentId: [],
+      });
+      assertKeys(special, [
+        'kind',
+        'group',
+        'publisher',
+        'event_at',
+        'sources',
+        'show_on_home',
+        'home_order',
+        'is_featured',
+        'is_pinned',
+        'pin_order',
+        'topics',
+      ]);
+      const sources = arrayValue(special.sources, 50).map((source) =>
+        externalUrl(requiredString(source, 2000), this.production),
+      );
+      if (sources.length === 0) unavailable();
+      return {
+        kind: type,
+        group: editorial.group,
         publisher: requiredString(special.publisher, 255),
-        source_url: externalUrl(
-          requiredString(special.source_url, 2000),
-          this.production,
-        ),
-        source_date:
-          special.source_date === null
-            ? null
-            : this.dateValue(special.source_date),
+        event_at: editorial.eventAt,
+        topics: editorial.topics,
+        sources,
       };
     }
     if (type === 'author') {
@@ -1962,7 +2542,17 @@ export class PublicContentService {
     const route = routeRegistry.find((item) => item.id === target.routeId);
     if (!route) unavailable('ROUTE_CONFLICT', 'errors.route_unavailable');
     if (
-      ['R002', 'R003', 'R004', 'R005', 'R006', 'R007'].includes(target.routeId)
+      [
+        'R002',
+        'R003',
+        'R004',
+        'R005',
+        'R006',
+        'R007',
+        'R054',
+        'R062',
+        'R081',
+      ].includes(target.routeId)
     ) {
       return { label, url: routeUrl(route[locale], this.siteOrigin()) };
     }
@@ -2147,6 +2737,13 @@ export class PublicContentService {
 
   private dateValue(value: Prisma.JsonValue | undefined): string {
     if (typeof value !== 'string') unavailable();
+    if (/^\d{4}$/u.test(value)) return value;
+    const yearMonth = /^(\d{4})-(\d{2})$/u.exec(value);
+    if (yearMonth) {
+      const month = Number(yearMonth[2]);
+      if (month < 1 || month > 12) unavailable();
+      return value;
+    }
     const dateOnly = /^\d{4}-\d{2}-\d{2}$/u.test(value);
     if (
       !dateOnly &&

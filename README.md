@@ -277,6 +277,8 @@ These additions use existing tables and require no new migration.
 | --- | --- |
 | `GET /api/content` | `locale`, `type`, optional `parent_id`, `page`, `page_size` |
 | `GET /api/content/:id` | Content UUID; `locale` |
+| `GET /api/publications` | `locale`, optional `group`, `year`, `topic`, `search`, `publisher`, `page` |
+| `GET /api/publications/landing` | `locale` |
 | `GET /api/home` | `locale` |
 | `GET /api/stores` | `locale` |
 | `GET /api/stores/:code` | `sofia` or `nessebar`; `locale` |
@@ -296,6 +298,24 @@ Only published translations and current routes are eligible. Private editorial
 evidence and source JSON identifiers are not exposed as public content.
 Internal targets are resolved against published entities; external links and
 source media must pass the configured-origin/approved-media checks.
+
+`GET /api/publications` returns all eligible `article`, `case_study` and `press`
+records, ordered by `event_at` newest first (stable ID tie-break), 12 per page.
+Filters apply to the requested locale's title/intro and shared group, year,
+topic and media-only publisher. `available_filters` is computed before the
+requested filters. Cards use their internal localized article route; publisher
+sources are returned only in the article detail. `GET /api/publications/landing`
+returns one selected lead (or the newest event when none is available), up to
+two stories and three media records; pinned records precede unpinned records
+within each group. Article details return up to two selected-first,
+same-group recommendations, followed by shared-topic and newest records.
+
+The HOME `stories` section's `articles` array is an independent selection:
+only published/current-route articles with `show_on_home: true` are returned,
+ordered by `home_order`. Missing locale publications are omitted, never
+replaced. The guarded CMS endpoint
+`GET /api/admin/website/publications/selection-status` reports whether all
+three positions are populated by BG/EN-available articles.
 
 HOME uses the configured published HOME record, not a fabricated landing page.
 Its `{locale,sections}` response preserves the source's 11 section keys and
@@ -650,8 +670,8 @@ type; use the existing source contract:
 | `hub`, `selection` | `selector_key` (nullable string) |
 | `knowledge` | `topic_code`, `gemstone_codes`, `bg`, `en`; each language object has `name`, `heading`, `lead`, exactly two `detail_paragraphs` |
 | `service` | `topic_code`, `scope_bg`, `scope_en`, `enquiry_topic` |
-| `article`, `case_study` | `event_at` (nullable date), `sources` (URL array), `evidence_ref` (nullable private string) |
-| `press` | `publisher`, `source_url`, `source_date` (nullable date) |
+| `article`, `case_study` | `group: "stories"`, `event_at` (nullable year/month/date/timestamp), `sources` (URL array), `evidence_ref` (nullable private string) |
+| `press` | `group: "media"`, `publisher`, `event_at` (nullable year/month/date/timestamp), `sources` (URL array) |
 | `author` | `verified_role_bg`, `verified_role_en` (nullable), `portrait_id` (nullable approved media UUID) |
 | `guide` | `unit_codes` (string array) |
 | `faq`, `contact` | No extra keys |
@@ -672,6 +692,31 @@ Related entities/media must already exist and internal link targets must
 resolve publicly in both supplied locales. Parent/author references are checked;
 hierarchy cycles, unavailable targets and duplicate slot/order pairs are rejected.
 Create referenced pages first, then update the HOME record to link them.
+Editorial records also require `show_on_home`/`home_order`, `is_featured`,
+`is_pinned`/`pin_order`, and shared `topics` in `special_data`. HOME accepts at
+most three unique positions (1–3); featured is globally unique; pin positions
+are unique within each group. `related_products` accepts up to three distinct
+published product links, and `related_articles` up to two distinct published
+same-group article links. an article's ordered `translations[].sections` array
+is the editable layout. Use `{"kind":"sources"}` and `{"kind":"about"}`
+markers to place the existing shared source list and localized `about` ContentLink
+in that order without duplicating their data. Runway content can retain two
+image blocks, three text blocks, then its sources/About link without inventing
+copy or linking products.
+Use approved localized image captions/alt text, translation-specific SEO and
+routes. Editorial URL paths use `/светът-на-ssg/...` in BG and
+`/en/world-of-ssg/...` in EN; the indexes are `/светът-на-ssg` and
+`/светът-на-ssg/всички` (EN `/en/world-of-ssg` and `/en/world-of-ssg/all`).
+About links use `/за-ssg` and `/en/about-ssg`. These are internal routes, not
+development redirects.
+
+The editorial selection fields are explicit even when disabled:
+`show_on_home: false`, `home_order: null`, `is_featured: false`,
+`is_pinned: false`, `pin_order: null`, and `topics: []`. When pinned,
+`pin_order` is a positive integer; otherwise it is null. When selected for
+HOME, `home_order` is 1–3; otherwise it is null. The migration normalizes the
+existing Press `source_date` to shared `event_at` and `source_url` to the
+article `sources` array, so CMS edits must not send duplicate legacy fields.
 The registered catalogue listing routes R002-R007 are static frontend destinations
 and resolve directly; they do not represent database-published content records.
 Route paths are locale-aware (`/en/...` for English), must be unoccupied,

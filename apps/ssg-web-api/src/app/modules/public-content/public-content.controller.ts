@@ -13,6 +13,7 @@ import {
   LocaleQueryDto,
   PolicyPathDto,
   PolicyQueryDto,
+  PublicationsQueryDto,
   SeoUrlsQueryDto,
   StorePathDto,
 } from './public-content.dto';
@@ -28,6 +29,16 @@ export class PublicContentController {
   @Get('content')
   listContent(@Query() query: ContentListQueryDto) {
     return this.publicContent.listContent(query);
+  }
+
+  @Get('publications')
+  publications(@Query() query: PublicationsQueryDto) {
+    return this.publicContent.publications(query);
+  }
+
+  @Get('publications/landing')
+  publicationLanding(@Query() query: LocaleQueryDto) {
+    return this.publicContent.publicationLanding(query.locale);
   }
 
   @Get('content/:id')
