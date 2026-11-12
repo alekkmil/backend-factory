@@ -472,8 +472,9 @@ export class WebsiteAdminService {
     translations: WebsiteContentDto['translations'],
   ): Promise<void> {
     if (!this.isPublicationType(type)) return;
-    const group = type === 'press' ? 'media' : 'stories';
-    if (specialData.group !== group) invalid('PUBLICATION_GROUP_INVALID');
+    if (specialData.group !== 'stories' && specialData.group !== 'media') {
+      invalid('PUBLICATION_GROUP_INVALID');
+    }
     if (links.some(link => link.target.kind === 'external')) {
       invalid('PUBLICATION_EXTERNAL_LINKS_NOT_ALLOWED');
     }
@@ -540,13 +541,11 @@ export class WebsiteAdminService {
       if (!target || !this.isPublicationType(target.type)) {
         invalid('RELATED_ARTICLE_TARGET_INVALID');
       }
-      const targetGroup = target.type === 'press' ? 'media' : 'stories';
       if (
-        targetGroup !== group ||
         !isJsonObject(target.specialData) ||
-        target.specialData.group !== group
+        (target.specialData.group !== 'stories' && target.specialData.group !== 'media')
       ) {
-        invalid('RELATED_ARTICLE_GROUP_MISMATCH');
+        invalid('RELATED_ARTICLE_TARGET_INVALID');
       }
     }
   }

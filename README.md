@@ -307,8 +307,9 @@ requested filters. Cards use their internal localized article route; publisher
 sources are returned only in the article detail. `GET /api/publications/landing`
 returns one selected lead (or the newest event when none is available), up to
 two stories and three media records; pinned records precede unpinned records
-within each group. Article details return up to two selected-first,
-same-group recommendations, followed by shared-topic and newest records.
+within each group. Article details return up to two recommendations: explicitly
+selected articles first (either group), followed by shared-topic and newest
+records in the current article's group.
 
 The HOME `stories` section's `articles` array is an independent selection:
 only published/current-route articles with `show_on_home: true` are returned,
@@ -670,8 +671,8 @@ type; use the existing source contract:
 | `hub`, `selection` | `selector_key` (nullable string) |
 | `knowledge` | `topic_code`, `gemstone_codes`, `bg`, `en`; each language object has `name`, `heading`, `lead`, exactly two `detail_paragraphs` |
 | `service` | `topic_code`, `scope_bg`, `scope_en`, `enquiry_topic` |
-| `article`, `case_study` | `group: "stories"`, `event_at` (nullable year/month/date/timestamp), `sources` (URL array), `evidence_ref` (nullable private string) |
-| `press` | `group: "media"`, `publisher`, `event_at` (nullable year/month/date/timestamp), `sources` (URL array) |
+| `article`, `case_study` | `group: "stories" \| "media"`, `publisher` (required only for media), `event_at` (nullable year/month/date/timestamp), `sources` (URL array), `evidence_ref` (nullable private string) |
+| `press` | `group: "stories" \| "media"`, `publisher` (required only for media), `event_at` (nullable year/month/date/timestamp), `sources` (nonempty URL array) |
 | `author` | `verified_role_bg`, `verified_role_en` (nullable), `portrait_id` (nullable approved media UUID) |
 | `guide` | `unit_codes` (string array) |
 | `faq`, `contact` | No extra keys |
@@ -697,7 +698,7 @@ Editorial records also require `show_on_home`/`home_order`, `is_featured`,
 most three unique positions (1–3); featured is globally unique; pin positions
 are unique within each group. `related_products` accepts up to three distinct
 published product links, and `related_articles` up to two distinct published
-same-group article links. an article's ordered `translations[].sections` array
+article links from either group. An article's ordered `translations[].sections` array
 is the editable layout. Use `{"kind":"sources"}` and `{"kind":"about"}`
 markers to place the existing shared source list and localized `about` ContentLink
 in that order without duplicating their data. Runway content can retain two
@@ -719,6 +720,15 @@ The editorial selection fields are explicit even when disabled:
 HOME, `home_order` is 1–3; otherwise it is null. The migration normalizes the
 existing Press `source_date` to shared `event_at` and `source_url` to the
 article `sources` array, so CMS edits must not send duplicate legacy fields.
+Publication grouping is independent of the immutable internal content type:
+change `special_data.group`, not `type` or `special_data.kind`. Include
+`publisher` for media and omit it for stories. Group changes do not change
+routes, HOME selections or explicitly selected related articles.
+The `20261112143000_correct_existing_publication_groups` data migration corrects
+the six existing SSG story/media records and selects Runway as the landing lead.
+It preserves their internal types, IDs, HOME flags/order, sources, translations,
+media and links. Empty databases are skipped with a notice; partially present
+records or mismatched media IDs/keys abort the transaction for review.
 The registered catalogue listing routes R002-R007 are static frontend destinations
 and resolve directly; they do not represent database-published content records.
 Route paths are locale-aware (`/en/...` for English), must be unoccupied,
