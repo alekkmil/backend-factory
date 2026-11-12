@@ -10,7 +10,7 @@ import { TransactionService } from '../../common/transactions/transaction.servic
 import { OutboxService } from '../../common/outbox/outbox.service';
 import { PublicContentService } from './public-content.service';
 import type {
-  WebsiteContentDto, WebsitePolicyDto, WebsiteSettingsDto,
+  WebsiteContentDto, WebsiteLinkDto, WebsitePolicyDto, WebsiteSettingsDto,
   WebsiteStoreDto, WebsiteWriteDto,
 } from './website-admin.dto';
 
@@ -36,6 +36,10 @@ function invalid(code = 'WEBSITE_CONTENT_INVALID', details?: Record<string, stri
 
 function conflict(code = 'VERSION_CONFLICT'): never {
   throw new ConflictException({ code, message_key: 'errors.version_conflict' });
+}
+
+function isJsonObject(value: Prisma.JsonValue): value is Prisma.JsonObject {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
 }
 
 const CONTENT_SELECT = {
@@ -88,6 +92,72 @@ export class WebsiteAdminService {
     return this.database(() => this.db.$transaction(tx => this.readSettings(tx)));
   }
 
+  publicationSelectionStatus() {
+    return this.database(() =>
+      this.db.$transaction(async tx => {
+        const rows = await tx.contentRecord.findMany({
+          where: {
+            type: { in: ['article', 'case_study', 'press'] },
+          },
+          select: {
+            id: true,
+            specialData: true,
+            from_ContentTranslation_contentId: {
+              select: { locale: true, published: true, title: true },
+            },
+            from_PublicRoute_contentId: {
+              where: { state: 'current' },
+              select: { locale: true },
+            },
+          },
+        });
+        const selected = rows.flatMap(row => {
+          if (!isJsonObject(row.specialData)) return [];
+          const special = row.specialData;
+          if (special.show_on_home !== true) return [];
+          const translations = new Map(
+            row.from_ContentTranslation_contentId.map(item => [item.locale, item]),
+          );
+          const routes = new Set(
+            row.from_PublicRoute_contentId.map(item => item.locale),
+          );
+          const available = {
+            bg: translations.get('bg')?.published === true && routes.has('bg'),
+            en: translations.get('en')?.published === true && routes.has('en'),
+          };
+          return [{
+            id: row.id,
+            home_order:
+              typeof special.home_order === 'number' ? special.home_order : null,
+            title_bg: translations.get('bg')?.title ?? null,
+            title_en: translations.get('en')?.title ?? null,
+            available,
+            incomplete_locales: (['bg', 'en'] as const).filter(
+              locale => !available[locale],
+            ),
+          }];
+        }).sort((left, right) =>
+          (left.home_order ?? Number.MAX_SAFE_INTEGER) -
+            (right.home_order ?? Number.MAX_SAFE_INTEGER) ||
+          left.id.localeCompare(right.id),
+        );
+        const positions = new Set(selected.map(item => item.home_order));
+        const complete =
+          selected.length === 3 &&
+          positions.size === 3 &&
+          [1, 2, 3].every(position => positions.has(position)) &&
+          selected.every(item => item.incomplete_locales.length === 0);
+        return {
+          expected_count: 3,
+          configured_count: selected.length,
+          complete,
+          incomplete: !complete,
+          items: selected,
+        };
+      }),
+    );
+  }
+
   saveContent(actorId: string, key: string, input: WebsiteContentDto) {
     return this.write(actorId, `content:${key}`, input, async tx => {
       this.locales(input.translations);
@@ -124,6 +194,13 @@ export class WebsiteAdminService {
       }
       const positions = input.links.map(link => `${link.slot}:${link.sort_order}`);
       if (new Set(positions).size !== positions.length) invalid('DUPLICATE_LINK_POSITION');
+      await this.validateEditorialLinks(
+        tx,
+        input.type,
+        input.special_data,
+        input.links,
+        input.translations,
+      );
       if (input.type === 'home') {
         const keys = input.special_data.section_keys;
         if (!Array.isArray(keys) || input.links.some(link => !keys.includes(link.slot))) {
@@ -140,6 +217,14 @@ export class WebsiteAdminService {
       const now = new Date();
       for (const translation of input.translations) {
         const path = normalizePublicPath(translation.path, translation.locale);
+        if (
+          this.isPublicationType(input.type) &&
+          !(translation.locale === 'bg'
+            ? path.startsWith('/светът-на-ssg/')
+            : path.startsWith('/en/world-of-ssg/'))
+        ) {
+          invalid('PUBLICATION_ROUTE_INVALID');
+        }
         const owner = await tx.publicRoute.findUnique({ where: { path } });
         const current = await tx.publicRoute.findFirst({
           where: { contentId: record.id, locale: translation.locale, state: 'current' },
@@ -167,6 +252,9 @@ export class WebsiteAdminService {
         });
       }
       await this.validate(() => this.publicContent.validateContent(tx, input));
+      if (this.isPublicationType(input.type)) {
+        await this.publicContent.validatePublicationSelections(tx);
+      }
       for (const [index, link] of input.links.entries()) {
         for (const translation of input.translations) {
           await this.validate(() => this.publicContent.validateLink(
@@ -370,6 +458,97 @@ export class WebsiteAdminService {
     if (target.kind === 'route' && typeof target.route_id === 'string') return { routeId: target.route_id };
     if (target.kind === 'external' && typeof target.url === 'string') return { externalUrl: target.url };
     return invalid('LINK_TARGET_INVALID');
+  }
+
+  private isPublicationType(type: WebsiteContentDto['type']): boolean {
+    return type === 'article' || type === 'case_study' || type === 'press';
+  }
+
+  private async validateEditorialLinks(
+    tx: Prisma.TransactionClient,
+    type: WebsiteContentDto['type'],
+    specialData: Prisma.JsonObject,
+    links: WebsiteLinkDto[],
+    translations: WebsiteContentDto['translations'],
+  ): Promise<void> {
+    if (!this.isPublicationType(type)) return;
+    const group = type === 'press' ? 'media' : 'stories';
+    if (specialData.group !== group) invalid('PUBLICATION_GROUP_INVALID');
+    if (links.some(link => link.target.kind === 'external')) {
+      invalid('PUBLICATION_EXTERNAL_LINKS_NOT_ALLOWED');
+    }
+
+    const products = links.filter(link => link.slot === 'related_products');
+    if (
+      products.length > 3 ||
+      products.some(link => link.target.kind !== 'product') ||
+      new Set(products.map(link => link.target.id)).size !== products.length
+    ) {
+      invalid('RELATED_PRODUCTS_INVALID');
+    }
+    const related = links.filter(link => link.slot === 'related_articles');
+    if (
+      related.length > 2 ||
+      related.some(link => link.target.kind !== 'content') ||
+      new Set(related.map(link => link.target.id)).size !== related.length
+    ) {
+      invalid('RELATED_ARTICLES_INVALID');
+    }
+    const about = links.filter(link => link.slot === 'about');
+    if (
+      about.length > 1 ||
+      about.some(
+        link =>
+          link.target.kind !== 'route' ||
+          link.target.route_id !== 'R062' ||
+          !link.label_bg?.trim() ||
+          !link.label_en?.trim(),
+      )
+    ) {
+      invalid('PUBLICATION_ABOUT_LINK_INVALID');
+    }
+    const hasSources =
+      Array.isArray(specialData.sources) && specialData.sources.length > 0;
+    for (const translation of translations) {
+      const sourceMarkers = translation.sections.filter(
+        section => section.kind === 'sources',
+      ).length;
+      const aboutMarkers = translation.sections.filter(
+        section => section.kind === 'about',
+      ).length;
+      if (sourceMarkers !== (hasSources ? 1 : 0)) {
+        invalid('PUBLICATION_SOURCES_LAYOUT_INVALID');
+      }
+      if (aboutMarkers !== (about.length ? 1 : 0)) {
+        invalid('PUBLICATION_ABOUT_LAYOUT_INVALID');
+      }
+    }
+
+    const relatedIds = related.flatMap(link =>
+      link.target.kind === 'content' && typeof link.target.id === 'string'
+        ? [link.target.id]
+        : [],
+    );
+    if (relatedIds.length === 0) return;
+    const targets = await tx.contentRecord.findMany({
+      where: { id: { in: relatedIds } },
+      select: { id: true, type: true, specialData: true },
+    });
+    const byId = new Map(targets.map(target => [target.id, target]));
+    for (const id of relatedIds) {
+      const target = byId.get(id);
+      if (!target || !this.isPublicationType(target.type)) {
+        invalid('RELATED_ARTICLE_TARGET_INVALID');
+      }
+      const targetGroup = target.type === 'press' ? 'media' : 'stories';
+      if (
+        targetGroup !== group ||
+        !isJsonObject(target.specialData) ||
+        target.specialData.group !== group
+      ) {
+        invalid('RELATED_ARTICLE_GROUP_MISMATCH');
+      }
+    }
   }
 
   private async validate(

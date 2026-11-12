@@ -40,6 +40,14 @@ export class WebsiteAdminController {
     private readonly media: WebsiteMediaService,
   ) {}
 
+  @Get('publications/selection-status')
+  publicationSelectionStatus(
+    @Query(CatalogueEmptyQueryPipe) query: CatalogueDetailQueryDto,
+  ) {
+    void query;
+    return this.website.publicationSelectionStatus();
+  }
+
   @Post('media')
   @HttpCode(200)
   @UseInterceptors(
