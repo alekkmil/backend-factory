@@ -709,6 +709,8 @@ routes. Editorial URL paths use `/светът-на-ssg/...` in BG and
 `/светът-на-ssg/всички` (EN `/en/world-of-ssg` and `/en/world-of-ssg/all`).
 About links use `/за-ssg` and `/en/about-ssg`. These are internal routes, not
 development redirects.
+The migration retains the old Bulgarian route rows as `gone` and inserts new
+current rows; it does not mutate immutable route identity or create redirects.
 
 The editorial selection fields are explicit even when disabled:
 `show_on_home: false`, `home_order: null`, `is_featured: false`,

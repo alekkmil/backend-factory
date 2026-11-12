@@ -1,3 +1,5 @@
+BEGIN;
+
 UPDATE "ContentRecord"
 SET "specialData" =
   ("specialData" - 'source_url' - 'source_date') ||
@@ -33,15 +35,47 @@ SET "specialData" = "specialData" || jsonb_build_object(
   )
 WHERE type IN ('article', 'case_study');
 
-UPDATE "PublicRoute"
-SET path = replace(path, '/светът-на-ссг', '/светът-на-ssg'),
-    "changedAt" = CURRENT_TIMESTAMP
-WHERE path LIKE '/светът-на-ссг%';
+WITH retired AS (
+  UPDATE "PublicRoute"
+  SET state = 'gone', "changedAt" = CURRENT_TIMESTAMP
+  WHERE path LIKE '/светът-на-ссг%'
+    AND state = 'current'
+  RETURNING path, locale, "productId", "contentId"
+)
+INSERT INTO "PublicRoute" (
+  id, path, locale, state, "productId", "contentId", "changedAt", "createdAt"
+)
+SELECT
+  gen_random_uuid(),
+  replace(path, '/светът-на-ссг', '/светът-на-ssg'),
+  locale,
+  'current',
+  "productId",
+  "contentId",
+  CURRENT_TIMESTAMP,
+  CURRENT_TIMESTAMP
+FROM retired;
 
-UPDATE "PublicRoute"
-SET path = '/за-ssg',
-    "changedAt" = CURRENT_TIMESTAMP
-WHERE path = '/за-ссг';
+WITH retired AS (
+  UPDATE "PublicRoute"
+  SET state = 'gone', "changedAt" = CURRENT_TIMESTAMP
+  WHERE path = '/за-ссг'
+    AND state = 'current'
+  RETURNING locale, "productId", "contentId"
+)
+INSERT INTO "PublicRoute" (
+  id, path, locale, state, "productId", "contentId", "changedAt", "createdAt"
+)
+SELECT
+  gen_random_uuid(),
+  '/за-ssg',
+  locale,
+  'current',
+  "productId",
+  "contentId",
+  CURRENT_TIMESTAMP,
+  CURRENT_TIMESTAMP
+FROM retired;
 
 UPDATE "DictionaryEntry"
 SET "labelBg" = CASE code
@@ -51,3 +85,5 @@ SET "labelBg" = CASE code
 END
 WHERE "group" = 'material_colour'
   AND code IN ('white', 'yellow', 'rose');
+
+COMMIT;
