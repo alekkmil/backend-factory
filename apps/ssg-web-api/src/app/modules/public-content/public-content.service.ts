@@ -566,46 +566,24 @@ export class PublicContentService {
   private publicationValues(row: PublicationRow): PublicationValues {
     const special = recordValue(row.specialData);
     if (special.kind !== row.type) unavailable();
-    assertKeys(
-      special,
-      row.type === 'press'
-        ? [
-            'kind',
-            'group',
-            'publisher',
-            'event_at',
-            'sources',
-            'show_on_home',
-            'home_order',
-            'is_featured',
-            'is_pinned',
-            'pin_order',
-            'topics',
-          ]
-        : [
-            'kind',
-            'group',
-            'event_at',
-            'sources',
-            'evidence_ref',
-            'show_on_home',
-            'home_order',
-            'is_featured',
-            'is_pinned',
-            'pin_order',
-            'topics',
-          ],
-    );
     if (special.group !== 'stories' && special.group !== 'media') {
       unavailable();
     }
     const group: PublicationGroup = special.group;
-    if (
-      (row.type === 'press' && group !== 'media') ||
-      (row.type !== 'press' && group !== 'stories')
-    ) {
-      unavailable();
-    }
+    assertKeys(special, [
+      'kind',
+      'group',
+      'event_at',
+      'sources',
+      'show_on_home',
+      'home_order',
+      'is_featured',
+      'is_pinned',
+      'pin_order',
+      'topics',
+      ...(row.type === 'press' ? [] : ['evidence_ref']),
+      ...(group === 'media' ? ['publisher'] : []),
+    ]);
     const eventAt =
       special.event_at === null ? null : this.dateValue(special.event_at);
     const topics = arrayValue(special.topics, 30).map((topic) =>
@@ -776,7 +754,6 @@ export class PublicContentService {
     const seen = new Set([currentId]);
     const append = (row: PublicationRow | undefined) => {
       if (!row || seen.has(row.id)) return;
-      if (metadata.get(row.id)?.group !== current.group) return;
       seen.add(row.id);
       result.push(row);
     };
@@ -2196,19 +2173,6 @@ export class PublicContentService {
         from_ContentTranslation_contentId: [],
         from_PublicRoute_contentId: [],
       });
-      assertKeys(special, [
-        'kind',
-        'group',
-        'event_at',
-        'sources',
-        'evidence_ref',
-        'show_on_home',
-        'home_order',
-        'is_featured',
-        'is_pinned',
-        'pin_order',
-        'topics',
-      ]);
       if (
         special.evidence_ref !== null &&
         (typeof special.evidence_ref !== 'string' ||
@@ -2227,6 +2191,7 @@ export class PublicContentService {
       return {
         kind: type,
         group: editorial.group,
+        ...(editorial.group === 'media' ? { publisher: editorial.publisher } : {}),
         author,
         event_at: editorial.eventAt,
         topics: editorial.topics,
@@ -2241,19 +2206,6 @@ export class PublicContentService {
         from_ContentTranslation_contentId: [],
         from_PublicRoute_contentId: [],
       });
-      assertKeys(special, [
-        'kind',
-        'group',
-        'publisher',
-        'event_at',
-        'sources',
-        'show_on_home',
-        'home_order',
-        'is_featured',
-        'is_pinned',
-        'pin_order',
-        'topics',
-      ]);
       const sources = arrayValue(special.sources, 50).map((source) =>
         externalUrl(requiredString(source, 2000), this.production),
       );
@@ -2261,7 +2213,7 @@ export class PublicContentService {
       return {
         kind: type,
         group: editorial.group,
-        publisher: requiredString(special.publisher, 255),
+        publisher: editorial.publisher,
         event_at: editorial.eventAt,
         topics: editorial.topics,
         sources,
