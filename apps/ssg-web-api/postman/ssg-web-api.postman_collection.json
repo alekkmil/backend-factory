@@ -183,6 +183,16 @@
           "response": []
         },
         {
+          "name": "Enquiry subjects and service contexts",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/enquiries/topics?language={{locale}}",
+            "description": "Seven localized subjects with canonical topic strings and the existing published service Content UUID where applicable. These are not request_type enum values."
+          },
+          "response": []
+        },
+        {
           "name": "Submit general enquiry",
           "request": {
             "method": "POST",
@@ -193,11 +203,11 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"request_id\": \"{{enquiryRequestId}}\",\n  \"request_type\": \"general\",\n  \"name\": \"Example Customer\",\n  \"email\": \"customer@example.com\",\n  \"topic\": \"Product enquiry\",\n  \"message\": \"Please contact me about your jewellery.\",\n  \"language\": \"{{locale}}\",\n  \"origin_route_id\": \"R050\"\n}",
+              "raw": "{\n  \"request_id\": \"{{enquiryRequestId}}\",\n  \"request_type\": \"general\",\n  \"name\": \"Example Customer\",\n  \"email\": \"customer@example.com\",\n  \"phone\": \"+12025550123\",\n  \"topic\": \"general\",\n  \"message\": \"\",\n  \"language\": \"{{locale}}\",\n  \"origin_route_id\": \"R001\",\n  \"opening_action\": \"home_enquiry\"\n}",
               "options": { "raw": { "language": "json" } }
             },
             "url": "{{baseUrl}}/api/enquiries",
-            "description": "Bootstrap a guest first and retain its Secure cookie. Requires server-configured coordinatorEmail. Returns 201/new or 200/same-payload replay; changed payload with the same request ID returns 409. Callback/similar requests require international phone; similar also requires published jewellery product context. Notifications are queued for private dev capture, not real email delivery."
+            "description": "Bootstrap a guest first and retain its Secure cookie. Requires name, email and international phone for every request type. Message can be empty or omitted. Requires server-configured coordinatorEmail. Returns 201/new or 200/same-payload replay; changed payload with the same request ID returns 409. Keep opening_action/origin_route_id/origin_entity fixed when topic changes; context holds the final service or fixed product UUID. Similar requests require published jewellery product context. Notifications are queued for private dev capture, not real email delivery."
           },
           "response": []
         },

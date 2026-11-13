@@ -864,6 +864,10 @@ model Inquiry {
   message                      String          @db.Text
   locale                       Locale
   originRouteId                String          @db.VarChar(80)
+  openingAction                String?         @db.VarChar(80)
+  originPath                   String?         @db.VarChar(1000)
+  originEntity                 Json?
+  contextSnapshot              Json?
   productId                    String?         @db.Uuid
   contentId                    String?         @db.Uuid
   storeCode                    LocationCode?
