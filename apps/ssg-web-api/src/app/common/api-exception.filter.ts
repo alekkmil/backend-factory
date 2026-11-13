@@ -68,6 +68,14 @@ export class ApiExceptionFilter implements ExceptionFilter {
       correlation_id: correlationId,
     };
     const details = customBody?.get('details');
+    if (status === HttpStatus.BAD_REQUEST && body.code === 'VALIDATION_ERROR' &&
+        details && typeof details === 'object' && !Array.isArray(details)) {
+      body.details = Object.fromEntries(Object.entries(details).flatMap(([field, constraint]) =>
+        /^[A-Za-z_][A-Za-z0-9_.-]{0,159}$/.test(field) &&
+        typeof constraint === 'string' && /^[A-Za-z_][A-Za-z0-9_]{0,79}$/.test(constraint)
+          ? [[field, constraint]] : [],
+      ));
+    }
     if (status === HttpStatus.BAD_REQUEST &&
         ['WEBSITE_CONTENT_INVALID', 'LINK_TARGET_UNAVAILABLE'].includes(body.code) &&
         details && typeof details === 'object' && !Array.isArray(details)) {

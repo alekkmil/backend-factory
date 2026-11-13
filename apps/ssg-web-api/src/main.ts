@@ -7,6 +7,7 @@ import { AppModule } from './app/app.module';
 import { ApiExceptionFilter } from './app/common/api-exception.filter';
 import { RequestAwareConsoleLogger } from './app/common/logging/request-aware-console-logger';
 import { RequestContextMiddleware } from './app/common/logging/request-context.middleware';
+import { validationException } from './app/common/validation-exception';
 
 async function bootstrap(): Promise<void> {
   const app = await NestFactory.create<NestExpressApplication>(AppModule, {
@@ -46,6 +47,7 @@ async function bootstrap(): Promise<void> {
       whitelist: true,
       forbidNonWhitelisted: true,
       transform: true,
+      exceptionFactory: validationException,
       transformOptions: {
         enableImplicitConversion: false,
       },

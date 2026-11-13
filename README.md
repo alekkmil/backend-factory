@@ -215,24 +215,121 @@ Secure localhost cookies; other plain HTTP environments cannot.
   "request_type": "general",
   "name": "Example Customer",
   "email": "customer@example.com",
-  "topic": "Product enquiry",
-  "message": "Please contact me about your jewellery.",
+  "phone": "+12025550123",
+  "topic": "general",
+  "message": "",
   "language": "en",
-  "origin_route_id": "R050"
+  "origin_route_id": "R001",
+  "opening_action": "home_enquiry"
 }
 ```
 
-`request_type` is `general`, `callback` or `similar_jewellery_creation`.
-An international `phone` is required for the latter two; optional fields must
-be omitted, not `null`. Similar-jewellery enquiries require
+`request_type` remains `general`, `callback` or `similar_jewellery_creation`;
+it is not the selected subject. Use `general` for all seven subjects below.
+The frontend joins first/last name into the existing `name` field; do not send
+new first/last-name fields. `name`, international `phone` and `email` are
+required for every request type. No boutique, appointment or purchase fields
+are required. `message` can be omitted or empty: both store exactly `""` and
+have the same idempotency hash, with no generated subject/placeholder text.
+Optional fields must be omitted, not `null`. Similar-jewellery enquiries require
 `context: {"type":"product","id":"<published jewellery UUID>"}`.
 Optional contexts also accept published `content` UUIDs and the `store` IDs
-`sofia`/`nessebar`. Contexts and origin route IDs are checked server-side against
-the registry and published data; a route pattern does not activate a page.
-Names/topics/messages are plain text, trimmed and NFC-normalized, with limits
-of 200/250/10000 characters. Emails are limited to 320 and phones to 40.
+`sofia`/`nessebar`. A product is identified only by its actual UUID; title,
+model codes (`Product.ssgId`, not legacy IDs) and localized internal URL are
+resolved and snapshotted server-side. Do not send a title or URL as identity.
+No product context is required for a generic gemstone consultation.
+
+| Field | Actual validation after trim/NFC normalization |
+| --- | --- |
+| `request_id` | UUID; retain for the entire attempt |
+| `name` | Required plain text, 1–200 characters |
+| `email` | Required email, 1–320 characters; domain lowercased |
+| `phone` | Required valid international phone number, 3–40 characters |
+| `topic` | Required plain text, 1–250 characters |
+| `message` | Optional plain text, 0–10000 characters; newlines/tabs allowed |
+| `language` | `bg` or `en` |
+| `origin_route_id` | Registered route ID, 1–80 characters |
+| `opening_action` | Lowercase identifier `[a-z][a-z0-9_]{0,79}` |
+| `context`, `origin_entity` | `{type:"product"\|"content"\|"store",id}`; ID 1–80 characters, UUID for products/content |
+
+Validation errors return HTTP 400 with `code: "VALIDATION_ERROR"` and
+`details` mapping field paths to validator/reason codes, for example
+`{"phone":"isPhoneNumber","context.id":"isUuid"}`. Values/contact data are
+not echoed in errors.
 Client-supplied recipients, unknown properties and invalid nested fields are
 rejected.
+
+#### Subjects and existing service records
+
+`GET /api/enquiries/topics?language=bg|en` returns the seven localized labels,
+canonical `topic` values, `request_type: "general"`, applicable published
+service `context` and `available`. Discover Content UUIDs from that endpoint
+rather than hardcoding environment-specific IDs. Unavailable service topics
+are flagged, not replaced with invented content. `topic` remains a bounded
+string (not a new Prisma enum); legacy free-text topics are still accepted.
+
+The existing deployment was checked on 2026-11-13; these UUIDs are shared by BG/EN:
+
+| BG label | EN label | `topic` | Applicable Content UUID |
+| --- | --- | --- | --- |
+| Общо запитване | General enquiry | `general` | None |
+| Лична консултация | Personal consultation | `consultation` | `c75a92bf-26c6-4096-93ee-207420a0d15a` |
+| Бижу по поръчка | Bespoke jewellery | `bespoke` | `c6662c44-fe9c-4675-a0f2-e0e16a64981e` |
+| Експертна оценка | Expert assessment | `assessment` | `46e997d0-2c0a-4f21-a3c0-32f6360230da` |
+| Сертификати и документи | Certificates and documents | `documents` | `a8c9659e-6880-4500-8055-ffb6a9740164` |
+| Избор на скъпоценен камък | Choosing a gemstone | `gemstone_selection` | Reuses consultation: `c75a92bf-26c6-4096-93ee-207420a0d15a` |
+| Корекция и поддръжка | Resizing and maintenance | `maintenance` | None; no dedicated published service record exists |
+
+`consultation`, `bespoke`, `assessment` and `documents` reuse the current
+service records' `special.enquiry_topic` values. `gemstone_selection` and
+`maintenance` are canonical topic strings added by this flow, not new service
+records. The backend derives the final service context from the selected
+canonical topic, even when `context` holds a fixed product UUID. A supplied
+content context must match that service. General/maintenance enquiries do not
+require a service Content UUID.
+
+#### Original source versus final purpose
+
+Keep `origin_route_id`, `opening_action`, `origin_entity` and `language` fixed
+from the moment the form opens. Change only `topic` and the final service
+`context` when the visitor changes subject; retain any fixed product UUID.
+Minimal new DTO fields are `opening_action` and `origin_entity` (same entity
+shape as `context`). Updated forms must send `opening_action`; omission remains
+accepted for legacy clients and is stored as null, never fabricated.
+`origin_entity` identifies the original product/content/store page, not the
+newly selected service. Static page owners are inferred from the current route
+when possible. Dynamic page routes require `origin_entity` when an opening
+action is supplied. Every supplied entity must be published/available in the
+submitted language and its origin URL must match the original registered route.
+Only that opening source is recorded, not referrers, query strings or browsing
+history. Old rows are not backfilled with guessed provenance.
+
+Examples (add the required contacts/request ID to each):
+
+- HOME: `origin_route_id: "R001"`, `opening_action: "home_enquiry"`,
+  `topic: "general"`, no product/context required.
+- Diamond article → assessment: `origin_route_id: "R030"`,
+  `opening_action: "knowledge_consultation"`,
+  `origin_entity: {type:"content",id:"<diamond knowledge UUID>"}`,
+  `topic: "assessment"` and optionally its assessment content context.
+  The original article remains separate from the final assessment service.
+- Favourites: `origin_route_id: "R053"`,
+  `opening_action: "favourites_enquiry"`,
+  `context: {type:"product",id:"<selected product UUID>"}`.
+  The favourites route and selected product both survive later topic changes.
+- Product page: `origin_route_id: "R025"` (jewellery) or `"R028"` (loose stone),
+  `opening_action: "product_enquiry"`, matching product `origin_entity` and
+  product `context`. Final service and fixed product can coexist.
+- Generic gemstone advice: `origin_route_id: "R026"`,
+  `opening_action: "gemstone_consultation"`, `topic: "gemstone_selection"`;
+  no product required.
+
+The existing staff-authenticated admin workflow now includes
+`GET /api/admin/enquiries?page=1&page_size=24` (page 1–21474836, page size 1–100) and
+`GET /api/admin/enquiries/:id`. Detail includes contacts/message, language,
+opening action, original route/path/entity, final product/service snapshots
+and notification status. These use the existing `StaffTokenGuard` with its
+development-only Origin/CSRF tokens; they are not public guest lookups.
 
 New submissions return HTTP 201 and `{"state":"received","reference":"<UUID>"}`.
 The inquiry, one durable notification intent and one audit event commit
@@ -241,7 +338,9 @@ the same normalized payload returns the original receipt (HTTP 200), even if
 publication/configuration later changes. A different payload returns HTTP 409.
 Do not generate a fresh ID after a timeout: send
 `{"request_id":"<original UUID>"}` to `POST /api/enquiries/attempt-status`.
-It returns the receipt or `{"state":"unknown_result"}`; it never exposes
+It returns the receipt or `{"state":"unknown_result"}`; the latter is
+unconfirmed, not a confirmed failure. Keep the same request ID and payload
+when checking/retrying. It never exposes
 another guest's submission or sends mail. No enquiry body/contact details are
 returned publicly or logged.
 
@@ -269,7 +368,19 @@ With the worker disabled, notifications stay queued durably. Capture failures
 remain retryable and do not invalidate a committed receipt. `received` means
 stored successfully, not delivered to an external mailbox. A reviewed real
 mail provider adapter is still required before production email activation.
-These additions use existing tables and require no new migration.
+Apply `20261113120000_extend_enquiry_context` through the normal deploy flow.
+It adds nullable provenance/snapshot columns and allows product plus final
+service context on the same enquiry; old records remain unchanged.
+
+Deployment check on 2026-11-13: the API at `http://63.188.34.212` serves the
+existing BG/EN service mappings, but guest bootstrap returns 403 for
+`Origin: https://dev.dwvs3v8mkdpq2.amplifyapp.com`, so live submission/replay
+verification is blocked and no verification enquiries were created.
+Set that exact origin (without a trailing slash) in deployed `CORS_ORIGINS`;
+`PUBLIC_SITE_ORIGIN` alone does not grant CORS/CSRF access. Also provide an
+HTTPS same-site API/proxy for the HTTPS frontend: the HTTP IP URL is mixed
+content and cannot support this Secure, SameSite=Lax guest cookie. Do not
+remove cookie security or Origin/CSRF checks to work around deployment setup.
 
 ### Public website content, configuration and SEO
 

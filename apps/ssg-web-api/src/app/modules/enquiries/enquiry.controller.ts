@@ -1,7 +1,7 @@
-import { Body, Controller, Post, Req, Res } from '@nestjs/common';
+import { Body, Controller, Get, Post, Query, Req, Res } from '@nestjs/common';
 import type { Request, Response } from 'express';
 import { GuestSessionService } from '../guest-session/guest-session.service';
-import { EnquiryAttemptDto, EnquirySubmitDto } from './enquiry.dto';
+import { EnquiryAttemptDto, EnquirySubmitDto, EnquiryTopicsQueryDto } from './enquiry.dto';
 import { EnquiryService } from './enquiry.service';
 
 @Controller('enquiries')
@@ -10,6 +10,11 @@ export class EnquiryController {
     private readonly guests: GuestSessionService,
     private readonly enquiries: EnquiryService,
   ) {}
+
+  @Get('topics')
+  topics(@Query() query: EnquiryTopicsQueryDto) {
+    return this.enquiries.topics(query.language);
+  }
 
   @Post()
   async submit(

@@ -3,11 +3,15 @@ import {
   IsDefined,
   IsEmail,
   IsIn,
+  IsInt,
   IsObject,
   IsPhoneNumber,
   IsString,
   IsUUID,
   Length,
+  Matches,
+  Max,
+  Min,
   ValidateBy,
   ValidateIf,
   ValidateNested,
@@ -67,14 +71,11 @@ export class EnquirySubmitDto extends EnquiryAttemptDto {
   @Length(1, 320)
   email!: string;
 
-  @ValidateIf((object: EnquirySubmitDto, value: unknown) =>
-    value !== undefined || object.request_type !== 'general',
-  )
   @Transform(({ value }) => normalizeText(value))
   @IsString()
   @Length(3, 40)
   @IsPhoneNumber()
-  phone?: string;
+  phone!: string;
 
   @Transform(({ value }) => normalizeText(value))
   @IsString()
@@ -84,9 +85,9 @@ export class EnquirySubmitDto extends EnquiryAttemptDto {
 
   @Transform(({ value }) => normalizeText(value))
   @IsString()
-  @Length(1, 10000)
+  @Length(0, 10000)
   @PlainText(true)
-  message!: string;
+  message = '';
 
   @IsIn(Object.values(Locale))
   language!: Locale;
@@ -96,9 +97,39 @@ export class EnquirySubmitDto extends EnquiryAttemptDto {
   origin_route_id!: string;
 
   @ValidateIf((_object, value: unknown) => value !== undefined)
+  @Matches(/^[a-z][a-z0-9_]{0,79}$/)
+  opening_action?: string;
+
+  @ValidateIf((_object, value: unknown) => value !== undefined)
+  @IsDefined()
+  @IsObject()
+  @ValidateNested()
+  @Type(() => EnquiryContextDto)
+  origin_entity?: EnquiryContextDto;
+
+  @ValidateIf((_object, value: unknown) => value !== undefined)
   @IsDefined()
   @IsObject()
   @ValidateNested()
   @Type(() => EnquiryContextDto)
   context?: EnquiryContextDto;
+}
+
+export class EnquiryTopicsQueryDto {
+  @IsIn(Object.values(Locale))
+  language!: Locale;
+}
+
+export class AdminEnquiryQueryDto {
+  @Transform(({ value }) => typeof value === 'string' && /^\d+$/.test(value) ? Number(value) : value)
+  @IsInt()
+  @Min(1)
+  @Max(21474836)
+  page = 1;
+
+  @Transform(({ value }) => typeof value === 'string' && /^\d+$/.test(value) ? Number(value) : value)
+  @IsInt()
+  @Min(1)
+  @Max(100)
+  page_size = 24;
 }

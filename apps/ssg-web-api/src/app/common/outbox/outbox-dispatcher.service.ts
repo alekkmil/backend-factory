@@ -88,6 +88,10 @@ export class OutboxDispatcherService {
         message: true,
         locale: true,
         originRouteId: true,
+        openingAction: true,
+        originPath: true,
+        originEntity: true,
+        contextSnapshot: true,
         productId: true,
         contentId: true,
         storeCode: true,
@@ -111,6 +115,10 @@ export class OutboxDispatcherService {
           product: 'Продукт',
           content: 'Съдържание',
           store: 'Магазин',
+          action: 'Действие',
+          originEntity: 'Първоначален контекст',
+          finalContext: 'Избран контекст',
+          path: 'Първоначална страница',
         }
       : {
           subject: 'New enquiry',
@@ -125,6 +133,10 @@ export class OutboxDispatcherService {
           product: 'Product',
           content: 'Content',
           store: 'Store',
+          action: 'Opening action',
+          originEntity: 'Original context',
+          finalContext: 'Selected context',
+          path: 'Original page',
         };
     const fields: [string, string][] = [
       [labels.name, inquiry.name],
@@ -133,6 +145,10 @@ export class OutboxDispatcherService {
       [labels.topic, inquiry.topic],
       [labels.message, inquiry.message],
       [labels.source, inquiry.originRouteId],
+      [labels.action, inquiry.openingAction ?? ''],
+      [labels.originEntity, inquiry.originEntity ? JSON.stringify(inquiry.originEntity) : ''],
+      [labels.finalContext, inquiry.contextSnapshot ? JSON.stringify(inquiry.contextSnapshot) : ''],
+      [labels.path, inquiry.originPath ?? ''],
       [labels.received, inquiry.createdAt.toISOString()],
       [labels.type, inquiry.type],
       [labels.product, inquiry.productId ?? ''],
