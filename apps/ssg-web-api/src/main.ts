@@ -3,6 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import { NestFactory } from '@nestjs/core';
 import type { NestExpressApplication } from '@nestjs/platform-express';
 import type { NextFunction, Request, Response } from 'express';
+import { urlencoded } from 'express';
 import { AppModule } from './app/app.module';
 import { ApiExceptionFilter } from './app/common/api-exception.filter';
 import { RequestAwareConsoleLogger } from './app/common/logging/request-aware-console-logger';
@@ -19,6 +20,10 @@ async function bootstrap(): Promise<void> {
     requestContextMiddleware.use(request, response, next),
   );
   app.useBodyParser('json', { limit: '10mb' });
+  app.use(
+    '/api/payments/borica/callback',
+    urlencoded({ extended: false, limit: '16kb', parameterLimit: 64 }),
+  );
   app.useLogger(new RequestAwareConsoleLogger());
 
   const config = app.get(ConfigService);

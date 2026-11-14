@@ -122,6 +122,24 @@ export function validateEnvironment(
   const smtpConfigured = Object.values(mailSettings).some(
     (value) => value !== '' && value !== undefined,
   );
+  const localTestMailEnabled =
+    environment.LOCAL_TEST_MAIL_ENABLED ?? 'false';
+  if (
+    localTestMailEnabled !== 'true' &&
+    localTestMailEnabled !== 'false'
+  ) {
+    throw new Error('LOCAL_TEST_MAIL_ENABLED must be true or false');
+  }
+  if (localTestMailEnabled === 'true') {
+    if (nodeEnv === 'production') {
+      throw new Error('Local test mail is disabled in production');
+    }
+    if (!smtpConfigured) {
+      throw new Error(
+        'SMTP sandbox settings are required when local test mail is enabled',
+      );
+    }
+  }
   let smtpPort = 0;
   if (smtpConfigured) {
     if (
@@ -195,6 +213,7 @@ export function validateEnvironment(
     DEV_STAFF_AUTH_ENABLED: devStaffAuthEnabled === 'true',
     DEV_CATALOGUE_PUBLISH_ENABLED: devCataloguePublish === 'true',
     OUTBOX_WORKER_ENABLED: outboxWorkerEnabled === 'true',
+    LOCAL_TEST_MAIL_ENABLED: localTestMailEnabled === 'true',
     STOCK_FACT_SOURCE_CODE: stockFactSourceCode,
     OUTBOX_CAPTURE_DIRECTORY: captureDirectory,
     SMTP_HOST: smtpConfigured ? String(mailSettings.host).trim() : '',

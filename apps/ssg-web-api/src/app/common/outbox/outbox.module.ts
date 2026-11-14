@@ -18,6 +18,11 @@ import { OutboxWorkerService } from './outbox-worker.service';
     OutboxDispatcherService,
     OutboxWorkerService,
   ],
-  exports: [OutboxService, OutboxDispatcherService, LocalMailCaptureService],
+  exports: [
+    OutboxService,
+    OutboxDispatcherService,
+    LocalMailCaptureService,
+    MailDeliveryService,
+  ],
 })
 export class OutboxModule {}

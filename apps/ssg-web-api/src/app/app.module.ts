@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { resolve } from 'node:path';
+import { AppController } from './app.controller';
 import { HealthModule } from './modules/health/health.module';
 import { PrismaModule } from './database/prisma.module';
 import { RequestContextMiddleware } from './common/logging/request-context.middleware';
@@ -19,6 +20,7 @@ import { EnquiryModule } from './modules/enquiries/enquiry.module';
 import { SearchModule } from './modules/search/search.module';
 import { InventoryModule } from './modules/inventory/inventory.module';
 import { PublicContentModule } from './modules/public-content/public-content.module';
+import { PaymentsModule } from './modules/payments/payments.module';
 
 @Module({
   imports: [
@@ -41,9 +43,11 @@ import { PublicContentModule } from './modules/public-content/public-content.mod
     SearchModule,
     InventoryModule.register(),
     PublicContentModule,
+    PaymentsModule,
     HealthModule,
     DictionaryModule,
   ],
+  controllers: [AppController],
   providers: [RequestContextMiddleware],
 })
 export class AppModule {}
