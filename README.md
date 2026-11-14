@@ -25,6 +25,31 @@ database names and the legacy Docker Compose project/volume identity remain
 unchanged so existing imported products and database containers are reused.
 The Postman collection is `apps/ssg-web-api/postman/ssg-web-api.postman_collection.json`.
 
+### BORICA diagnostic callback
+
+`POST /api/payments/borica/callback` accepts form-urlencoded fields without
+customer authentication and returns HTTP 200 with `{"received":true}`.
+Form parsing is limited to this callback path (16 KB, 64 parameters).
+Only allowlisted diagnostic fields are logged, with bounded printable values.
+Signatures, unknown fields and full request bodies are not logged.
+
+This is an **unverified diagnostic endpoint**, not a payment integration:
+it does not verify `P_SIGN`, persist events, update the database, or mark orders
+paid. The response acknowledges receipt only. Do not rely on it for real
+payments; authenticated verification and reconciliation must be implemented
+against the merchant technical package first.
+
+```sh
+curl -i http://localhost:3001/api/payments/borica/callback \
+  -H 'Content-Type: application/x-www-form-urlencoded' \
+  --data-urlencode 'ACTION=0' \
+  --data-urlencode 'RC=00' \
+  --data-urlencode 'ORDER=000123' \
+  --data-urlencode 'TERMINAL=TEST' \
+  --data-urlencode 'AMOUNT=10.00' \
+  --data-urlencode 'CURRENCY=EUR'
+```
+
 ### Dev deployment to AWS Lightsail
 
 Pushes to `dev` that change this application, shared libraries/tooling, or root
