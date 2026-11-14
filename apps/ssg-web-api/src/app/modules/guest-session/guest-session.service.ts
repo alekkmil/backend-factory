@@ -51,6 +51,9 @@ export class GuestSessionService {
     if (!origin || !approvedOrigins.includes(origin)) {
       throw new ForbiddenException();
     }
+    const sameSite = this.config.getOrThrow<'lax' | 'none'>(
+      'SESSION_COOKIE_SAME_SITE',
+    );
     this.enforceRateLimit(clientIp);
 
     const existingToken = this.readCookie(cookieHeader);
@@ -90,7 +93,7 @@ export class GuestSessionService {
         select: { id: true, expiresAt: true },
       });
       setCookie(
-        `${SESSION_COOKIE}=${token}; Path=/; Max-Age=86400; HttpOnly; Secure; SameSite=Lax`,
+        `${SESSION_COOKIE}=${token}; Path=/; Max-Age=86400; HttpOnly; Secure; SameSite=${sameSite === 'none' ? 'None' : 'Lax'}`,
       );
       setCacheControl('private, no-store');
       return {

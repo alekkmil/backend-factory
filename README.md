@@ -230,9 +230,16 @@ For enquiries, first `POST /api/guest-session` with `{}` and an allowed
 `Origin`. Keep its Secure HttpOnly cookie and send its `csrf_token` as
 `X-CSRF-Token` with the same `Origin`. Browser requests must use
 `credentials: 'include'`; credentialed CORS accepts only configured origins.
-Use HTTPS, with frontend and API on the same site for the existing
-`SameSite=Lax` cookie. HTTP localhost can be used where the client accepts
-Secure localhost cookies; other plain HTTP environments cannot.
+`SESSION_COOKIE_SAME_SITE` accepts `lax` (the default) or `none`; invalid values
+fail startup. Prefer HTTPS frontend/API domains on the same site with `lax`.
+For cross-site HTTPS deployments such as Amplify calling CloudFront, set
+`SESSION_COOKIE_SAME_SITE=none` in the deployed backend environment and
+deploy/restart the updated API. Cookies remain Secure, HttpOnly and host-only;
+Origin and CSRF validation are unchanged. Bootstrap a fresh session after the
+change and verify that the browser stores/sends the cookie. Third-party-cookie
+blocking may still require same-site custom domains or a same-site proxy.
+HTTP localhost can be used where the client accepts Secure localhost cookies;
+other plain HTTP environments cannot.
 
 ```json
 {
@@ -403,8 +410,10 @@ existing BG/EN service mappings, but guest bootstrap returns 403 for
 verification is blocked and no verification enquiries were created.
 Set that exact origin (without a trailing slash) in deployed `CORS_ORIGINS`;
 `PUBLIC_SITE_ORIGIN` alone does not grant CORS/CSRF access. Also provide an
-HTTPS same-site API/proxy for the HTTPS frontend: the HTTP IP URL is mixed
-content and cannot support this Secure, SameSite=Lax guest cookie. Do not
+HTTPS API/proxy for the HTTPS frontend: the HTTP IP URL is mixed
+content and cannot support this Secure guest cookie. Prefer a same-site
+deployment, or configure `SESSION_COOKIE_SAME_SITE=none` for cross-site HTTPS.
+Do not
 remove cookie security or Origin/CSRF checks to work around deployment setup.
 
 ### Public website content, configuration and SEO

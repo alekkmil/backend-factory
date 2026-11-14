@@ -62,6 +62,11 @@ export function validateEnvironment(
     }
   }
 
+  const sessionCookieSameSite = environment.SESSION_COOKIE_SAME_SITE ?? 'lax';
+  if (sessionCookieSameSite !== 'lax' && sessionCookieSameSite !== 'none') {
+    throw new Error('SESSION_COOKIE_SAME_SITE must be lax or none');
+  }
+
   const devStaffAuthEnabled = environment.DEV_STAFF_AUTH_ENABLED ?? 'false';
   const devCataloguePublish =
     environment.DEV_CATALOGUE_PUBLISH_ENABLED ?? 'false';
@@ -210,6 +215,7 @@ export function validateEnvironment(
     TRUST_PROXY: trustProxy,
     DATABASE_URL: databaseUrl,
     CORS_ORIGINS: corsOrigins.join(','),
+    SESSION_COOKIE_SAME_SITE: sessionCookieSameSite,
     DEV_STAFF_AUTH_ENABLED: devStaffAuthEnabled === 'true',
     DEV_CATALOGUE_PUBLISH_ENABLED: devCataloguePublish === 'true',
     OUTBOX_WORKER_ENABLED: outboxWorkerEnabled === 'true',
