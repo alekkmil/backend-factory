@@ -23,6 +23,7 @@ import {
 import type { ProductSummary } from '../products/product-read.service';
 import { PrismaService } from '../../database/prisma.service';
 import { routeRegistry } from '../../common/publication/route-registry';
+import { hashIdempotencyPayload } from '../../common/transactions/transaction.service';
 import type {
   ContentListQueryDto,
   PolicyQueryDto,
@@ -1522,8 +1523,10 @@ export class PublicContentService {
             sections: true,
             seoTitle: true,
             seoDescription: true,
+            ogImageId: true,
             publishedAt: true,
             publicModifiedAt: true,
+            articleModifiedAt: true,
           },
         },
         from_PublicRoute_contentId: {
@@ -1566,6 +1569,9 @@ export class PublicContentService {
             ?.items.find((item) => item.media !== null)?.media ??
           null);
     const summary = contentSummaryFrom(record, locale, origin, primaryImage);
+    const ogImage = translation.ogImageId
+      ? (await this.mediaByIds(transaction, [translation.ogImageId], locale))[0]
+      : primaryImage;
     const special = await this.projectSpecial(
       transaction,
       record.type,
@@ -1705,8 +1711,59 @@ export class PublicContentService {
       },
       seo_title: translation.seoTitle,
       seo_description: translation.seoDescription,
+      og_image: ogImage,
       published_at: dateIso(translation.publishedAt),
       modified_at: dateIso(translation.publicModifiedAt),
+      article_modified_at: record.type === 'article' || record.type === 'case_study'
+        ? dateIso(translation.articleModifiedAt) : null,
+    };
+  }
+
+  async publicationFingerprint(
+    transaction: ReadTransaction,
+    id: string,
+    locale: Locale,
+  ): Promise<{ page: string; article: string } | null> {
+    let detail: Awaited<ReturnType<PublicContentService['contentDetailInTransaction']>>;
+    try {
+      detail = await this.contentDetailInTransaction(transaction, id, locale);
+    } catch (error) {
+      if (error instanceof NotFoundException) return null;
+      throw error;
+    }
+    const {
+      published_at, modified_at, article_modified_at, ...page
+    } = detail;
+    void published_at;
+    void modified_at;
+    void article_modified_at;
+    const home = detail.type === 'home'
+      ? await this.homeInTransaction(transaction, locale) : null;
+    return {
+      page: hashIdempotencyPayload(home
+        ? { ...page, assembled_sections: home.sections.filter(section => section.key !== 'footer') }
+        : page),
+      article: hashIdempotencyPayload({
+        title: detail.title,
+        intro: detail.intro,
+        sections: detail.sections
+          .filter((section) => !['link_cards', 'about'].includes(section.kind))
+          .map((section) => section.kind === 'faq'
+            ? {
+                ...section,
+                items: section.items.map(item => ({
+                  ...item, links: item.links.map(link => ({ label: link.label })),
+                })),
+              }
+            : section),
+        special: detail.special.kind === 'article' || detail.special.kind === 'case_study'
+          ? {
+              ...detail.special,
+              author: detail.special.author
+                ? { title: detail.special.author.title, intro: detail.special.author.intro } : null,
+            }
+          : detail.special,
+      }),
     };
   }
 
@@ -1722,6 +1779,7 @@ export class PublicContentService {
         intro: string | null;
         seo_title: string | null;
         seo_description: string | null;
+        og_image_id?: string | null;
         sections: Prisma.JsonObject[];
       }[];
     },
@@ -1745,6 +1803,12 @@ export class PublicContentService {
           translation.locale,
         ),
       );
+      const imageId = translation.og_image_id;
+      if (imageId) {
+        await this.atField(`translations[${index}].og_image_id`, () =>
+          this.mediaByIds(transaction, [imageId], translation.locale),
+        );
+      }
       for (const [sectionIndex, section] of translation.sections.entries()) {
         await this.atField(
           `translations[${index}].sections[${sectionIndex}]`,
@@ -2373,7 +2437,11 @@ export class PublicContentService {
   ): Promise<ReturnType<typeof projectMedia>[]> {
     if (ids.length === 0) return [];
     const assets = await transaction.mediaAsset.findMany({
-      where: { id: { in: ids } },
+      where: {
+        id: { in: ids },
+        reviewStatus: 'approved',
+        releaseIdRelation: { is: { approved: true } },
+      },
       select: {
         id: true,
         releaseId: true,

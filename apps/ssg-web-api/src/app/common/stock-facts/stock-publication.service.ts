@@ -177,6 +177,9 @@ export class StockPublicationService {
             firstPublishedDate: row.firstPublishedDate,
             publicationEvidence: row.publicationEvidence,
             publicModifiedAt: row.publicModifiedAt,
+            seoTitle: row.seoTitle,
+            seoDescription: row.seoDescription,
+            ogImageId: row.ogImageId,
           })),
         });
         await tx.revisionMaterial.createMany({

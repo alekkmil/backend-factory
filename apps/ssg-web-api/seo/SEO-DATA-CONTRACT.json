@@ -1,0 +1,403 @@
+{
+  "contract_name": "SSG shared public page SEO projection",
+  "version": "1.0-proposed-2026-11-13",
+  "status": "Proposed coordinated extension. Existing fields are documentary evidence, not a claim of live support.",
+  "transport_decision": "Add page_seo to existing page-level public GET responses; no mandatory separate /api/seo/page endpoint. Page content and page_seo are serialized from the same committed public projection.",
+  "naming": "snake_case REST; explicit mapping to existing camelCase persistence",
+  "models": {
+    "HistoricalDate": {
+      "type": "RFC3339 datetime string with explicit timezone | YYYY-MM-DD date-only | null",
+      "rules": [
+        "Preserve verified historical precision.",
+        "Never invent midnight for date-only history.",
+        "New publication events use UTC instants.",
+        "Unknown remains null.",
+        "No future publication/modification for an already public page."
+      ]
+    },
+    "PageSeo": {
+      "required_fields": {
+        "route_id": "string: stable route identity, not user-controlled path",
+        "locale": "bg | en",
+        "template": "string: approved template identifier from PAGE-TEMPLATE-MATRIX.json",
+        "url": "absolute URL: current canonical route under trusted configured origin",
+        "alternate_urls": "{ bg: absolute URL|null, en: absolute URL|null }: only real published equivalents, including current locale",
+        "seo_title": "string|null: resolved approved localized title; production publication readiness rejects missing required title",
+        "seo_description": "string|null: approved localized summary; never fabricated from unrelated/private text",
+        "og_image": "PublicMedia|null: existing allowlisted approved media DTO; explicit approved override or documented template fallback",
+        "indexability": "PageIndexability",
+        "published_at": "HistoricalDate: original first publication of this localized page/article when known",
+        "public_modified_at": "HistoricalDate: last significant published change of this localized URL projection",
+        "article_modified_at": "HistoricalDate: substantive editorial change to the Article entity; null when unknown or not applicable",
+        "public_revision_key": "opaque non-secret string: committed public projection generation shared with body; not a timestamp substitute"
+      }
+    },
+    "PageIndexability": {
+      "required_fields": {
+        "intended_index": "boolean: production policy for the current published URL before environment protection",
+        "sitemap_eligible": "boolean: true only for approved current canonical published indexable 200 URL included by sitemap policy",
+        "effective_robots": "index,follow | noindex,follow | noindex,nofollow",
+        "environment_override": "boolean: true when DEV/staging/prelaunch controls override intended policy"
+      },
+      "invariants": [
+        "sitemap_eligible implies intended_index; public sitemap still disabled by protected environment policy.",
+        "Private routes never enter the public metadata/feed projection.",
+        "Robots directives do not replace authentication."
+      ]
+    },
+    "SeoUrlExisting": {
+      "fields": {
+        "url": "absolute URL",
+        "locale": "bg|en",
+        "alternates": "{bg:absolute URL|null,en:absolute URL|null}",
+        "lastmod": "HistoricalDate"
+      },
+      "compatibility_change": "lastmod definition widens prior ISODateTime|null to HistoricalDate; coordinate date-only parser support"
+    },
+    "SeoFeedResponse": {
+      "required_fields": {
+        "items": "SeoUrlExisting[]",
+        "next_cursor": "UUID|null",
+        "snapshot_id": "UUID"
+      },
+      "optional_fields": {
+        "public_revision_key": "opaque export manifest generation"
+      },
+      "rules": [
+        "snapshot_id is a proposed additive field, not established deployed API.",
+        "Each continuation uses the same snapshot_id.",
+        "No mixing route pages from different export snapshots.",
+        "Null lastmod means XML element omitted."
+      ]
+    },
+    "SeoFeedRequest": {
+      "query": {
+        "limit": "integer 1..1000, default 500",
+        "after_id": "UUID optional; prior next_cursor",
+        "snapshot_id": "UUID optional on first request, required with after_id"
+      },
+      "failure_cases": {
+        "invalid_input": "400",
+        "expired_snapshot": "409 with restart_from_first_page=true",
+        "upstream_failure": "503, never empty success"
+      }
+    },
+    "StaffSeoPreviewResponse": {
+      "required_fields": {
+        "items": "SeoUrlExisting[]",
+        "next_cursor": "UUID|null",
+        "snapshot_id": "UUID",
+        "environment": "dev | staging | production_prelaunch",
+        "public_feed_enabled": "false",
+        "diagnostics": "bounded staff-only diagnostic array"
+      },
+      "rules": [
+        "Protected staff authorization; private,no-store,noindex.",
+        "Same selector/serializer as production feed.",
+        "Never dump private records, tokens, unpublished body or internal customer data."
+      ]
+    },
+    "DateHistoryInput": {
+      "fields": {
+        "mode": "initialize_import | correct_verified_history",
+        "reason": "nonblank string <=1000 characters",
+        "locales": "DateHistoryLocale[] unique bg/en"
+      },
+      "rules": [
+        "initialize_import only declared migrated locale before first publication here",
+        "correct_verified_history requires staff permission, reason, current concurrency token and audit",
+        "no arbitrary public_modified_at clock input on ordinary writes"
+      ]
+    },
+    "DateHistoryLocale": {
+      "fields": {
+        "locale": "bg | en",
+        "published": "DateEvidence",
+        "public_modified": "DateEvidence",
+        "article_modified": "DateEvidence",
+        "original_publication": "{published_at:HistoricalDate non-null,locale:bg|en,url:absolute|null,source_ref:nonblank string}|null"
+      },
+      "rules": [
+        "all three DateEvidence objects explicit",
+        "known values require verifiable locale-specific provenance",
+        "private source_ref never serialized in public DTO"
+      ]
+    },
+    "DateEvidence": {
+      "fields": {
+        "value": "HistoricalDate",
+        "source_ref": "nonblank string <=1000 characters when value known, otherwise null"
+      },
+      "rules": [
+        "unknown remains null",
+        "capture/import date not proof of publication",
+        "reject future or impossible chronology",
+        "preserve date-only precision"
+      ]
+    }
+  },
+  "compatibility_map": [
+    {
+      "surface": "Content write/read translations",
+      "existing": [
+        "locale",
+        "path",
+        "published",
+        "title",
+        "intro",
+        "seo_title",
+        "seo_description",
+        "sections"
+      ],
+      "evidence": "13 November Postman HOME create example",
+      "action": "Retain; extend existing admin validation to missing SEO fields for other page types."
+    },
+    {
+      "surface": "ProductDetail.dates.first_published_at",
+      "existing": true,
+      "action": "Alias from same authoritative source as page_seo.published_at; preserve HistoricalDate."
+    },
+    {
+      "surface": "ProductDetail.dates.public_modified_at",
+      "existing": true,
+      "action": "Alias from same authoritative source as page_seo.public_modified_at; coordinate date-only widening if preserving historic modified date."
+    },
+    {
+      "surface": "ContentDetail.published_at",
+      "existing": true,
+      "action": "Alias from same authoritative source as page_seo.published_at; broaden date-only precision deliberately."
+    },
+    {
+      "surface": "ContentDetail.modified_at",
+      "existing": true,
+      "action": "Inspect deployed mapping. Preserve legacy semantics during migration. Do not treat as Article modification unless proven. Existing storage documents publicModifiedAt only."
+    },
+    {
+      "surface": "page_seo.article_modified_at",
+      "existing": false,
+      "action": "Add explicit editorial date source. Do not backfill from generic legacy modified_at without evidence."
+    },
+    {
+      "surface": "page_seo.public_modified_at",
+      "existing": false,
+      "action": "Expose existing authoritative page modification where valid; extend aggregate route projections for all page types."
+    },
+    {
+      "surface": "GET /api/seo/urls",
+      "existing": "Documented in current Postman collection; current live behavior must be recorded separately.",
+      "action": "Keep DEV public404 gate. Complete/verify all-template selector, truthful lastmod and stable snapshot pagination."
+    },
+    {
+      "surface": "GET /api/admin/seo/preview",
+      "existing": false,
+      "action": "Proposed protected DEV diagnostic using same production selector; use an equivalent existing protected export only if it has the same contract."
+    },
+    {
+      "surface": "cache_invalidate outbox",
+      "existing": "Prior design: product_ids,content_ids,route_paths,revision_key",
+      "action": "Reuse; add explicit affected locale/route generations or derive from committed route identity, preserving replay safety."
+    }
+  ],
+  "page_level_consumers": [
+    {
+      "endpoint": "GET /api/products/{id}?locale=...",
+      "context": "product or loose stone detail"
+    },
+    {
+      "endpoint": "GET /api/content/{id}?locale=...",
+      "context": "content detail including approved article/service/guide/hub/etc."
+    },
+    {
+      "endpoint": "GET /api/home?locale=...",
+      "context": "assembled HOME; own root projection, not one arbitrary source section"
+    },
+    {
+      "endpoint": "GET /api/catalog?... normalized route/selector/page context",
+      "context": "catalogue/curated category. Resolve metadata by actual page route and query, not first product."
+    },
+    {
+      "endpoint": "GET /api/content?... normalized type/route/page context",
+      "context": "editorial/content list route. Bind metadata to actual list page, not first article."
+    },
+    {
+      "endpoint": "GET /api/stores/{code}?locale=...",
+      "context": "individual store"
+    },
+    {
+      "endpoint": "GET /api/stores?locale=...",
+      "context": "store index route metadata via same public projection/adapter"
+    },
+    {
+      "endpoint": "GET /api/site-contacts?locale=...",
+      "context": "contact page; shared contact facts do not independently identify every consumer"
+    },
+    {
+      "endpoint": "GET /api/policies/{kind}?locale=...",
+      "context": "current policy route; historical version rules preserved"
+    },
+    {
+      "endpoint": "existing shared published route/config adapter",
+      "context": "approved static public routes without business endpoints; same metadata model"
+    }
+  ],
+  "publication_events": {
+    "in_transaction": [
+      "Validate expected version, publish eligibility and route uniqueness.",
+      "Compare old/new semantic public projections per locale.",
+      "Persist approved content/current route/date changes and public_revision_key.",
+      "Persist dependency-aware invalidation outbox event with original event time."
+    ],
+    "after_commit": [
+      "Invalidate relevant HTML/API/metadata/JSON-LD/list/route/sitemap caches.",
+      "Retry failed delivery idempotently with original revision/time.",
+      "Never advance dates because worker retries or cache regenerates."
+    ],
+    "private_audit_fields": [
+      "source_event_id",
+      "record_created_at",
+      "technical_updated_at",
+      "legacy_date_source",
+      "legacy_date_precision",
+      "legacy_date_verified_by",
+      "import_batch_id"
+    ],
+    "not_public": "Evidence references and private audit provenance are not serialized into public page_seo."
+  },
+  "examples": {
+    "note": "Synthetic valid type examples only; not live SSG content or endpoint responses.",
+    "article_page_seo": {
+      "route_id": "synthetic-article-route",
+      "locale": "bg",
+      "template": "ARTICLE",
+      "url": "https://ssg.bg/светът-на-ssg/пример",
+      "alternate_urls": {
+        "bg": "https://ssg.bg/светът-на-ssg/пример",
+        "en": null
+      },
+      "seo_title": "Примерен материал | SSG",
+      "seo_description": "Синтетичен пример за формата на данните.",
+      "og_image": null,
+      "indexability": {
+        "intended_index": true,
+        "sitemap_eligible": true,
+        "effective_robots": "noindex,follow",
+        "environment_override": true
+      },
+      "published_at": "2019-03-10",
+      "public_modified_at": "2026-11-13T16:00:00Z",
+      "article_modified_at": null,
+      "public_revision_key": "synthetic-public-revision-2"
+    },
+    "explanation": "Example article original date is known only to day; a current related-product card changed the page, not the article body. Article.dateModified must be omitted; WebPage/date and sitemap can reflect the actual page update.",
+    "feed_response": {
+      "items": [
+        {
+          "url": "https://ssg.bg/светът-на-ssg/пример",
+          "locale": "bg",
+          "alternates": {
+            "bg": "https://ssg.bg/светът-на-ssg/пример",
+            "en": null
+          },
+          "lastmod": "2026-11-13T16:00:00Z"
+        }
+      ],
+      "next_cursor": null,
+      "snapshot_id": "11111111-1111-4111-8111-111111111111"
+    }
+  },
+  "acceptance_invariants": [
+    "Page content, SEO projection and timestamps share public_revision_key.",
+    "Original published_at never becomes import/deploy/DNS time.",
+    "Unknown historical dates remain null and output date fields are omitted.",
+    "Article.dateModified reads article_modified_at, not generic technical or page date.",
+    "Sitemap lastmod reads localized page public_modified_at.",
+    "BG-only published content change does not advance unaffected EN.",
+    "Shared visible commercial changes refresh actual affected locales and list projections.",
+    "Hidden/internal facts and no-op changes do not advance public dates.",
+    "Cache invalidation set may be larger than significant-date-change set.",
+    "DEV public SEO feed remains gated while protected diagnostics permit acceptance.",
+    "Whole-cart EUR2000 limit is not a public-product indexability threshold."
+  ],
+  "original_publication_mapping": {
+    "path": "Content.special.original_publication",
+    "status": "Proposed optional field for an own SSG work translated/summarized later",
+    "shape": {
+      "published_at": "HistoricalDate, non-null when object supplied",
+      "locale": "bg | en",
+      "url": "verified absolute original-work URL | null"
+    },
+    "rules": [
+      "Preserve original work publication separately from actual first publication of the new language version.",
+      "Visible label must say original publication; Article.datePublished describes represented current locale work.",
+      "Existing migrated same-locale article preserves its own verified original date.",
+      "No invented external-source attribution for SSG-owned content."
+    ]
+  },
+  "collection_context": {
+    "proposed_query": "page_route_id",
+    "when": "Only when existing selector inputs cannot unambiguously resolve the public landing-page route",
+    "validation": "Route ID, locale, template and selector must match; omission uses base-list context",
+    "compatibility": "Validate new query fields before frontend use. Legacy array GET default stays array; include_page_seo=true explicitly returns {items:[legacy records],page_seo} from one committed snapshot. Object GETs add page_seo. Static gaps reuse route-backed content adapter."
+  },
+  "sitemap_pagination_policy": "Base list URL only in sitemap. Valid unfiltered page 2+ remains indexable/self-canonical/reachable by links but is excluded from sitemap.",
+  "observed_live_sample": {
+    "observed": "2026-11-13",
+    "source": "Lead agent read-only Postman visible response",
+    "request": "GET /api/products/277c7df4-7d7c-4e40-92ed-b6f8a0edf491?locale=en",
+    "http_status": 200,
+    "observed_fields": [
+      "url",
+      "alternate_urls",
+      "dates.first_published_at",
+      "dates.public_modified_at"
+    ],
+    "dates": {
+      "first_published_at": null,
+      "public_modified_at": "2026-11-07T10:38:15.553Z"
+    },
+    "scope": "One visible sample; not full response schema certification or history verification"
+  },
+  "format": "Descriptive typed contract/reference JSON; not executable JSON Schema or OpenAPI. Implement runtime DTOs and publish actual OpenAPI/Postman schemas.",
+  "array_opt_in": {
+    "query": "include_page_seo=true",
+    "default": "existing legacy array shape unchanged",
+    "opted_response": {
+      "items": "existing array elements",
+      "page_seo": "PageSeo"
+    },
+    "consistency": "Read and serialize items/page_seo from same committed projection; new frontend opts in."
+  },
+  "dev_propagation_acceptance": {
+    "editorial_max_seconds": 60,
+    "status": "Proposed acceptance target, not measured",
+    "scope": "HTML + metadata + protected sitemap preview after ordinary successful publication",
+    "commercial": "Current committed state/no-store for price/availability/hidden-price",
+    "failure": "Visible retryable propagation failure; no false complete acknowledgement or timestamp bump on retry"
+  },
+  "admin_write_extensions": {
+    "content": {
+      "endpoint": "PUT /api/admin/website/content/{key}",
+      "existing": "request_id, expected_updated_at, translations[].seo_title/seo_description",
+      "add": "translations[].og_image_id; root date_history"
+    },
+    "product": {
+      "endpoint": "PATCH /api/admin/catalogue/{id}/draft",
+      "existing": "request_id, expected_version, complete draft replacement",
+      "add": "draft.seo_translations[{locale,seo_title,seo_description,og_image_id}], draft.date_history",
+      "effect": "Draft only; explicit publish applies reviewed values"
+    },
+    "store": {
+      "endpoint": "PUT /api/admin/website/stores/{code}",
+      "existing": "request_id, expected_updated_at, public_data",
+      "add": "public_data.bg/en seo_title,seo_description,og_image_id; root date_history"
+    },
+    "policy": {
+      "endpoint": "PUT /api/admin/website/policies/{kind}/{version}",
+      "existing": "request_id, expected_current_version, translations[]",
+      "add": "translations[].seo_title/seo_description/og_image_id; root date_history",
+      "constraint": "Immutable accepted policy text/version unchanged; route metadata corrections use existing route-backed adapter where needed"
+    }
+  },
+  "compatibility_omission_rule": "Older replacement clients omitting newly added SEO/history fields preserve stored values. New records initialize nullable SEO only; readiness applies. Explicit null clears optional SEO override, not historical dates. Date clearing requires correct_verified_history with audit.",
+  "historical_saved_response_evidence": "evidence/dates-history-excerpt.json: saved own article API published_at 2026-11-13 versus approved original 2022-06-02. Not current live read; requires date-history import/HTML verification."
+}

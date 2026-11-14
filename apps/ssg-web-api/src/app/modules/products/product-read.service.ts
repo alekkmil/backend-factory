@@ -55,6 +55,9 @@ const PRODUCT_SELECT = {
           firstPublishedAt: true,
           firstPublishedDate: true,
           publicModifiedAt: true,
+          seoTitle: true,
+          seoDescription: true,
+          ogImageId: true,
         },
       },
       from_RevisionImage_revisionId: {
@@ -147,6 +150,9 @@ export interface ProductSummary {
 }
 
 interface ProductDetail extends ProductSummary {
+  seo_title: string | null;
+  seo_description: string | null;
+  og_image: PublicMedia;
   description: string;
   materials:
     | {
@@ -813,6 +819,14 @@ export class ProductReadService {
         message_key: 'errors.media_not_ready',
       });
     }
+    const socialImage = translation.ogImageId
+      ? media.find((image) => image.id === translation.ogImageId)
+      : mainImage;
+    if (!socialImage) {
+      throw new ServiceUnavailableException({
+        code: 'MEDIA_NOT_READY', message_key: 'errors.media_not_ready',
+      });
+    }
     const materials =
       revision.materialsState === 'unknown'
         ? null
@@ -883,6 +897,9 @@ export class ProductReadService {
 
     return {
       ...summary,
+      seo_title: translation.seoTitle,
+      seo_description: translation.seoDescription,
+      og_image: socialImage,
       description: translation.description,
       materials,
       gemstones,

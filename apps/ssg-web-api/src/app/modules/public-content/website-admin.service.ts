@@ -50,6 +50,7 @@ const CONTENT_SELECT = {
     select: {
       locale: true, published: true, title: true, intro: true, sections: true,
       seoTitle: true, seoDescription: true,
+      ogImageId: true, publishedAt: true, publicModifiedAt: true, articleModifiedAt: true,
     },
   },
   from_PublicRoute_contentId: {
@@ -163,6 +164,13 @@ export class WebsiteAdminService {
       this.locales(input.translations);
       const existing = await tx.contentRecord.findUnique({ where: { key } });
       this.expectedTimestamp(existing?.updatedAt, input.expected_updated_at);
+      const previousTranslations = existing
+        ? await tx.contentTranslation.findMany({ where: { contentId: existing.id } }) : [];
+      const previousFingerprints = new Map<Locale, { page: string; article: string } | null>();
+      for (const locale of ['bg', 'en'] as const) {
+        previousFingerprints.set(locale, existing
+          ? await this.publicContent.publicationFingerprint(tx, existing.id, locale) : null);
+      }
       if (existing && existing.type !== input.type) conflict('CONTENT_TYPE_IMMUTABLE');
       if (input.type === 'home') {
         const other = await tx.contentRecord.findFirst({
@@ -235,15 +243,11 @@ export class WebsiteAdminService {
         if (!owner) await tx.publicRoute.create({
           data: { path, locale: translation.locale, contentId: record.id, state: 'current', changedAt: now },
         });
-        const previous = await tx.contentTranslation.findUnique({
-          where: { contentId_locale: { contentId: record.id, locale: translation.locale } },
-        });
         const translated = {
           published: translation.published, title: translation.title, intro: translation.intro,
           sections: translation.sections, seoTitle: translation.seo_title,
           seoDescription: translation.seo_description,
-          publishedAt: previous?.publishedAt ?? (translation.published ? now : null),
-          publicModifiedAt: now,
+          ...(translation.og_image_id === undefined ? {} : { ogImageId: translation.og_image_id }),
         };
         await tx.contentTranslation.upsert({
           where: { contentId_locale: { contentId: record.id, locale: translation.locale } },
@@ -276,6 +280,30 @@ export class WebsiteAdminService {
           await this.validate(() => this.publicContent.homeInTransaction(tx, translation.locale),
             'home_projection', translation.locale);
         }
+      }
+      for (const translation of input.translations.filter(item => item.published)) {
+        const locale = translation.locale;
+        const previous = previousTranslations.find(item => item.locale === locale);
+        const before = previousFingerprints.get(locale);
+        const after = await this.publicContent.publicationFingerprint(tx, record.id, locale);
+        if (!after) throw new Error('Published content projection is missing after validation');
+        const previousPage = previous?.publicProjectionHash ?? before?.page;
+        const previousArticle = previous?.articleProjectionHash ?? before?.article;
+        const wasPublished = previous?.hasBeenPublished === true;
+        const editorial = input.type === 'article' || input.type === 'case_study';
+        await tx.contentTranslation.update({
+          where: { contentId_locale: { contentId: record.id, locale } },
+          data: {
+            hasBeenPublished: true,
+            publishedAt: wasPublished ? previous.publishedAt : now,
+            publicModifiedAt: !wasPublished || previousPage !== after.page
+              ? now : previous?.publicModifiedAt ?? null,
+            articleModifiedAt: editorial && wasPublished && previousArticle &&
+              previousArticle !== after.article ? now : previous?.articleModifiedAt ?? null,
+            publicProjectionHash: after.page,
+            articleProjectionHash: after.article,
+          },
+        });
       }
       return this.readContent(tx, key);
     });
@@ -395,6 +423,13 @@ export class WebsiteAdminService {
         locale: item.locale, path: row.from_PublicRoute_contentId.find(route => route.locale === item.locale)?.path ?? null,
         published: item.published, title: item.title, intro: item.intro,
         seo_title: item.seoTitle, seo_description: item.seoDescription, sections: item.sections,
+        og_image_id: item.ogImageId,
+      })),
+      publication_dates: row.from_ContentTranslation_contentId.map(item => ({
+        locale: item.locale,
+        published_at: item.publishedAt?.toISOString() ?? null,
+        public_modified_at: item.publicModifiedAt?.toISOString() ?? null,
+        article_modified_at: item.articleModifiedAt?.toISOString() ?? null,
       })),
       links: row.from_ContentLink_ownerContentId.map(link => ({
         slot: link.slot, sort_order: link.sortOrder,

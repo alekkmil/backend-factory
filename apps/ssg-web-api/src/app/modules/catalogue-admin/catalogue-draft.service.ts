@@ -34,6 +34,14 @@ function normalizedText(value: string | null, maximum: number): string | null {
 
 function normalizeDraft(input: CatalogueSaveDraftDto['draft']): NormalizedDraft {
   const draft: NormalizedDraft = {
+    ...(input.seo_translations === undefined ? {} : {
+      seo_translations: input.seo_translations.map((text) => ({
+        locale: text.locale,
+        seo_title: normalizedText(text.seo_title, 250),
+        seo_description: normalizedText(text.seo_description, 1000),
+        og_image_id: text.og_image_id?.toLowerCase() ?? null,
+      })),
+    }),
     ...(input.specifications === undefined ? {} : {
       specifications: parseSpecifications(input.specifications),
     }),
@@ -63,6 +71,8 @@ function normalizeDraft(input: CatalogueSaveDraftDto['draft']): NormalizedDraft 
     change_reason_note: normalizedText(input.change_reason_note, 2000),
   };
   if (
+    (draft.seo_translations &&
+      new Set(draft.seo_translations.map((text) => text.locale)).size !== 2) ||
     new Set(draft.materials.map((material) => material.material_code)).size !== draft.materials.length ||
     new Set(draft.gemstone_codes).size !== draft.gemstone_codes.length ||
     new Set(draft.fulfilment_methods).size !== draft.fulfilment_methods.length ||
@@ -269,6 +279,16 @@ export class CatalogueDraftService {
             },
             update: { name: draft.name_en, description: draft.description_en },
           });
+          for (const text of draft.seo_translations ?? []) {
+            await transaction.productTranslation.update({
+              where: { revisionId_locale: { revisionId, locale: text.locale } },
+              data: {
+                seoTitle: text.seo_title,
+                seoDescription: text.seo_description,
+                ogImageId: text.og_image_id,
+              },
+            });
+          }
           await transaction.revisionMaterial.deleteMany({ where: { revisionId } });
           if (draft.materials.length) {
             await transaction.revisionMaterial.createMany({
@@ -349,6 +369,14 @@ export class CatalogueDraftService {
     productId: string,
     draft: NormalizedDraft,
   ): Promise<void> {
+    for (const text of draft.seo_translations ?? []) {
+      if (text.og_image_id && !draft.image_ids.includes(text.og_image_id)) {
+        throw new BadRequestException({
+          code: 'VALIDATION_ERROR', message_key: 'errors.validation',
+          details: { [`seo_translations.${text.locale}.og_image_id`]: 'image_not_in_revision' },
+        });
+      }
+    }
     if (
       draft.sales_mode === 'archive_catalogue' &&
       draft.price_visibility !== 'hidden'

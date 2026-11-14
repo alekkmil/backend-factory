@@ -63,6 +63,10 @@ export class WebsiteTranslationDto {
   @MaxLength(1000)
   seo_description!: string | null;
 
+  @ValidateIf((_, value: unknown) => value !== undefined && value !== null)
+  @IsUUID()
+  og_image_id?: string | null;
+
   @IsArray()
   @ArrayMaxSize(200)
   @IsObject({ each: true })
