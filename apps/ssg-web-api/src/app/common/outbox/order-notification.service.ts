@@ -3,10 +3,8 @@ import { isEmail, isUUID } from 'class-validator';
 import { Prisma } from '../../../generated/prisma/client';
 import { PrismaService } from '../../database/prisma.service';
 import { TransactionService } from '../transactions/transaction.service';
-import {
-  LocalMailCaptureService,
-  MailCaptureError,
-} from './local-mail-capture.service';
+import { MailDeliveryService, MailDeliveryError } from './mail-delivery.service';
+import { MailCaptureError } from './local-mail-capture.service';
 import {
   OutboxDispatchError,
   renderMail,
@@ -28,7 +26,7 @@ export class OrderNotificationService implements OutboxJobHandler {
   constructor(
     private readonly prisma: PrismaService,
     private readonly transactions: TransactionService,
-    private readonly capture: LocalMailCaptureService,
+    private readonly mailDelivery: MailDeliveryService,
   ) {}
 
   async dispatch(message: ClaimedOutboxMessage): Promise<OutboxDispatchResult> {
@@ -73,7 +71,7 @@ export class OrderNotificationService implements OutboxJobHandler {
     }
     try {
       // Reconcile external acceptance before looking at state that may have changed.
-      const prior = await this.capture.lookup(message.id);
+      const prior = await this.mailDelivery.lookup(message.id);
       if (prior) {
         return { outcome: 'sent', providerMessageId: prior };
       }
@@ -234,12 +232,15 @@ export class OrderNotificationService implements OutboxJobHandler {
       }
       return {
         outcome: 'sent',
-        providerMessageId: await this.capture.capture(
+        providerMessageId: await this.mailDelivery.deliver(
           message.id, renderMail(message.recipientSnapshot, subject, fields),
         ),
       };
     } catch (error) {
       if (error instanceof MailCaptureError) {
+        throw new OutboxDispatchError(error.code);
+      }
+      if (error instanceof MailDeliveryError) {
         throw new OutboxDispatchError(error.code);
       }
       throw error;
