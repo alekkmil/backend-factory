@@ -2,10 +2,8 @@ import { Injectable } from '@nestjs/common';
 import { isEmail } from 'class-validator';
 import type { JobKind } from '../../../generated/prisma/enums';
 import { PrismaService } from '../../database/prisma.service';
-import {
-  LocalMailCaptureService,
-  MailCaptureError,
-} from './local-mail-capture.service';
+import { MailDeliveryService, MailDeliveryError } from './mail-delivery.service';
+import { MailCaptureError } from './local-mail-capture.service';
 import { OrderNotificationService } from './order-notification.service';
 import { OutboxDispatchError, renderMail } from './outbox-handler';
 import type { OutboxDispatchResult, OutboxJobHandler } from './outbox-handler';
@@ -20,7 +18,7 @@ export class OutboxDispatcherService {
 
   constructor(
     private readonly prisma: PrismaService,
-    private readonly capture: LocalMailCaptureService,
+    private readonly mailDelivery: MailDeliveryService,
     private readonly orderNotifications: OrderNotificationService,
   ) {}
 
@@ -36,7 +34,7 @@ export class OutboxDispatcherService {
 
   async dispatch(message: ClaimedOutboxMessage): Promise<OutboxDispatchResult> {
     if (message.kind === 'inquiry_received') {
-      return this.captureInquiry(message);
+      return this.deliverInquiry(message);
     }
     if (
       message.kind === 'customer_payment_received' ||
@@ -51,7 +49,7 @@ export class OutboxDispatcherService {
     return handler.dispatch(message);
   }
 
-  private async captureInquiry(
+  private async deliverInquiry(
     message: ClaimedOutboxMessage,
   ): Promise<OutboxDispatchResult> {
     const payload = message.payload;
@@ -157,10 +155,13 @@ export class OutboxDispatcherService {
     ];
     const mail = renderMail(message.recipientSnapshot, labels.subject, fields);
     try {
-      const providerMessageId = await this.capture.capture(message.id, mail);
+      const providerMessageId = await this.mailDelivery.deliver(message.id, mail);
       return { outcome: 'sent', providerMessageId };
     } catch (error) {
       if (error instanceof MailCaptureError) {
+        throw new OutboxDispatchError(error.code);
+      }
+      if (error instanceof MailDeliveryError) {
         throw new OutboxDispatchError(error.code);
       }
       throw error;

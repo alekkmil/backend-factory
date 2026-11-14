@@ -1,4 +1,5 @@
 import { isAbsolute } from 'node:path';
+import { isEmail } from 'class-validator';
 
 const defaultCorsOrigins = 'http://localhost:3000';
 
@@ -110,15 +111,55 @@ export function validateEnvironment(
       'OUTBOX_CAPTURE_DIRECTORY must be an absolute private directory',
     );
   }
+  const mailSettings = {
+    host: environment.SMTP_HOST ?? '',
+    port: environment.SMTP_PORT ?? '',
+    user: environment.SMTP_USER ?? '',
+    password: environment.SMTP_PASSWORD ?? '',
+    from: environment.MAIL_FROM ?? '',
+    sandboxRecipient: environment.MAIL_TO ?? '',
+  };
+  const smtpConfigured = Object.values(mailSettings).some(
+    (value) => value !== '' && value !== undefined,
+  );
+  let smtpPort = 0;
+  if (smtpConfigured) {
+    if (
+      typeof mailSettings.host !== 'string' ||
+      !mailSettings.host.trim() ||
+      /[\r\n]/.test(mailSettings.host) ||
+      typeof mailSettings.user !== 'string' ||
+      !mailSettings.user.trim() ||
+      typeof mailSettings.password !== 'string' ||
+      !mailSettings.password ||
+      typeof mailSettings.from !== 'string' ||
+      !isEmail(mailSettings.from) ||
+      typeof mailSettings.sandboxRecipient !== 'string' ||
+      !isEmail(mailSettings.sandboxRecipient)
+    ) {
+      throw new Error(
+        'SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASSWORD, MAIL_FROM and MAIL_TO must all be configured with valid values',
+      );
+    }
+    smtpPort = Number(mailSettings.port);
+    if (!Number.isInteger(smtpPort) || smtpPort < 1 || smtpPort > 65535) {
+      throw new Error('SMTP_PORT must be an integer between 1 and 65535');
+    }
+    if (nodeEnv === 'production') {
+      throw new Error(
+        'SMTP transport is not enabled for production; configure it in the production mail deployment task',
+      );
+    }
+  }
   if (outboxWorkerEnabled === 'true') {
     if (nodeEnv === 'production') {
       throw new Error(
         'Outbox worker requires a reviewed production adapter; local capture is development-only',
       );
     }
-    if (!captureDirectory) {
+    if (!smtpConfigured && !captureDirectory) {
       throw new Error(
-        'OUTBOX_CAPTURE_DIRECTORY is required when the worker is enabled',
+        'Configure SMTP sandbox delivery or OUTBOX_CAPTURE_DIRECTORY when the worker is enabled',
       );
     }
   }
@@ -156,6 +197,12 @@ export function validateEnvironment(
     OUTBOX_WORKER_ENABLED: outboxWorkerEnabled === 'true',
     STOCK_FACT_SOURCE_CODE: stockFactSourceCode,
     OUTBOX_CAPTURE_DIRECTORY: captureDirectory,
+    SMTP_HOST: smtpConfigured ? String(mailSettings.host).trim() : '',
+    SMTP_PORT: smtpPort,
+    SMTP_USER: smtpConfigured ? String(mailSettings.user).trim() : '',
+    SMTP_PASSWORD: smtpConfigured ? mailSettings.password : '',
+    MAIL_FROM: smtpConfigured ? String(mailSettings.from).trim() : '',
+    MAIL_TO: smtpConfigured ? String(mailSettings.sandboxRecipient).trim() : '',
     ...workerNumbers,
   };
 }
