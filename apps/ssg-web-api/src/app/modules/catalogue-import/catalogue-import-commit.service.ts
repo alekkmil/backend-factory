@@ -653,6 +653,9 @@ export class CatalogueImportCommitService {
               firstPublishedDate: true,
               publicationEvidence: true,
               publicModifiedAt: true,
+              seoTitle: true,
+              seoDescription: true,
+              ogImageId: true,
             },
           },
           from_RevisionGemstone_revisionId: {

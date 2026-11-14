@@ -465,6 +465,9 @@ model ProductTranslation {
   firstPublishedDate  String?         @db.VarChar(10)
   publicationEvidence String?         @db.VarChar(1000)
   publicModifiedAt    DateTime?       @db.Timestamptz(3)
+  seoTitle            String?         @db.VarChar(250)
+  seoDescription      String?         @db.VarChar(1000)
+  ogImageId           String?         @db.Uuid
   revisionIdRelation  ProductRevision @relation("ProductTranslation_revisionId", fields: [revisionId], references: [id], onDelete: Restrict)
 
   @@unique([revisionId, locale])
@@ -637,8 +640,13 @@ model ContentTranslation {
   sections          Json
   seoTitle          String?       @db.VarChar(250)
   seoDescription    String?       @db.VarChar(1000)
+  ogImageId         String?       @db.Uuid
   publishedAt       DateTime?     @db.Timestamptz(3)
   publicModifiedAt  DateTime?     @db.Timestamptz(3)
+  articleModifiedAt DateTime?     @db.Timestamptz(3)
+  hasBeenPublished  Boolean       @default(false)
+  publicProjectionHash String?    @db.VarChar(64)
+  articleProjectionHash String?   @db.VarChar(64)
   createdAt         DateTime      @default(now()) @db.Timestamptz(3)
   updatedAt         DateTime      @updatedAt @db.Timestamptz(3)
   contentIdRelation ContentRecord @relation("ContentTranslation_contentId", fields: [contentId], references: [id], onDelete: Restrict)

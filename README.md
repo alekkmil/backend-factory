@@ -581,6 +581,65 @@ All these endpoints validate query parameters and use no-store freshness.
 Missing/invalid required source data fails explicitly; implementation does not
 populate HOME, policy, contact or store content in your database on reads.
 
+### SEO stage 1: product/content persistence and publication dates
+
+The additive `20261114120000_add_localized_seo_and_editorial_dates` migration
+is required before running this code. It retains existing public dates,
+initializes private publication markers for existing published translations,
+and leaves unknown article-update dates null. It does not repair historical
+dates or infer an article edit from the legacy `modified_at`.
+
+- `PATCH /api/admin/catalogue/:id/draft` accepts optional
+  `draft.seo_translations`, a complete two-entry BG/EN array. Each entry contains
+  `locale`, `seo_title` (nullable, up to 250 characters), `seo_description`
+  (nullable, up to 1,000 characters), and `og_image_id` (nullable asset UUID).
+  Duplicate locales, unknown fields and an array-level null are invalid.
+  An override must reference a selected image in that product revision.
+  Omission preserves stored SEO, including when cloning a released revision;
+  explicit field-level null clears the override. New records initialize null.
+  Staff reads return the complete array. Saving never changes public SEO/dates.
+  Explicit publication applies SEO and advances only changed locale dates,
+  retaining original publication dates and existing slug rules.
+- `PUT /api/admin/website/content/:key` retains existing localized
+  `seo_title`/`seo_description` and accepts optional
+  `translations[].og_image_id`. Omission preserves the stored image; null clears
+  it. Overrides use the existing approved product/editorial media resolver,
+  including approval of the owning release. Invalid media rolls back the write.
+- Product and content detail responses add `seo_title`, `seo_description` and
+  `og_image` (content already returned the two SEO strings). These strings are
+  stored overrides, not a new fully resolved `page_seo` contract. The product
+  social-image fallback is its approved main image; content uses its existing
+  primary section image or null. These fields are read with the body in the
+  existing repeatable-read transaction. No new public endpoint is introduced.
+- Content detail additionally returns nullable `article_modified_at` for
+  `article`/`case_study`; other content types return null. Legacy `modified_at`
+  still means the page's `public_modified_at`. First publication sets original
+  publication/page dates but leaves the article-update date null. Later
+  substantive title/intro/body/author changes advance the article date;
+  SEO/social-image-only changes and related-card/navigation destinations do not.
+- Content saves compare canonical public projections per locale. Unchanged
+  saves, idempotent replays and unpublished-only saves retain public dates.
+  Private committed fingerprints retain the last released comparison across
+  unpublish/edit/republish; republishing does not reset original publication.
+  HOME comparison also uses its assembled primary sections, excluding footer-only
+  changes. Admin reads add a separate read-only `publication_dates` array; do not
+  send that root field in a PUT. Editable `translations` remain directly reusable.
+
+Audit, concurrency checks, date changes and the existing durable
+`cache_invalidate` intent remain in the same transaction. An intent is **not**
+proof of frontend propagation; no cache delivery handler is added by this stage.
+The existing production-only sitemap gate is unchanged in this stage.
+
+Still pending from the broader SEO assignment: authenticated `date_history`
+imports/corrections and provenance/audit, date-only content/feed contracts,
+store/policy SEO, unified resolved `page_seo` and revision keys for all templates,
+cross-page dependency propagation, frontend invalidation delivery, stable feed
+snapshots and the agreed development feed/preview exposure. These proposed
+queries/endpoints are not accepted merely because the reference contract lists
+them. Image re-encoding equivalence and the full significant-change QA matrix
+also require the later publication/dependency work; this stage does not claim
+the entire SEO brief is implemented.
+
 ### Development website content management
 
 All routes below use the same development-only `StaffTokenGuard` as catalogue

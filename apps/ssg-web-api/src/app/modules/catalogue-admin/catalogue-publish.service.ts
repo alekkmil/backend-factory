@@ -115,7 +115,9 @@ export class CataloguePublishService {
               this.conflict('ROUTE_CONFLICT');
             }
             const old = oldTranslations.find((row) => row.locale === locale);
-            const changed = sharedChange || text.name !== old?.name || text.description !== old?.description;
+            const changed = sharedChange || text.name !== old?.name || text.description !== old?.description ||
+              text.seoTitle !== old?.seoTitle || text.seoDescription !== old?.seoDescription ||
+              text.ogImageId !== old?.ogImageId;
             await transaction.productTranslation.update({
               where: { id: text.id },
               data: {

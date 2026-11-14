@@ -1,9 +1,9 @@
 import { Transform, Type } from 'class-transformer';
 import {
-  ArrayMaxSize, Equals, IsArray, IsDefined, IsIn, IsInt, IsString,
+  ArrayMaxSize, ArrayMinSize, Equals, IsArray, IsDefined, IsIn, IsInt, IsString,
   IsUUID, Matches, Max, MaxLength, Min, ValidateIf, ValidateNested,
 } from 'class-validator';
-import { PublicationStatus } from '../../../generated/prisma/enums';
+import { Locale, PublicationStatus } from '../../../generated/prisma/enums';
 import { JewellerySpecificationsDto } from '../../common/jewellery-specifications';
 import type {
   CompositionState, DeliveryScope, FulfilmentMethod, LocationCode, PriceVisibility,
@@ -75,7 +75,36 @@ export class CatalogueDraftMaterialDto {
   gold_karat_code!: string | null;
 }
 
+export class ProductSeoTranslationDto {
+  @IsIn(Object.values(Locale))
+  locale!: Locale;
+
+  @ValidateIf((_, value: unknown) => value !== null)
+  @IsString()
+  @Matches(/\S/)
+  @MaxLength(250)
+  seo_title!: string | null;
+
+  @ValidateIf((_, value: unknown) => value !== null)
+  @IsString()
+  @Matches(/\S/)
+  @MaxLength(1000)
+  seo_description!: string | null;
+
+  @ValidateIf((_, value: unknown) => value !== null)
+  @IsUUID()
+  og_image_id!: string | null;
+}
+
 export class ProductDraftInputDto {
+  @ValidateIf((_, value: unknown) => value !== undefined)
+  @IsArray()
+  @ArrayMinSize(2)
+  @ArrayMaxSize(2)
+  @ValidateNested({ each: true })
+  @Type(() => ProductSeoTranslationDto)
+  seo_translations?: ProductSeoTranslationDto[];
+
   @ValidateIf((_, value: unknown) => value !== undefined && value !== null)
   @ValidateNested()
   @Type(() => JewellerySpecificationsDto)
@@ -245,6 +274,7 @@ export interface AdminCatalogueList {
 }
 
 export interface ProductDraft {
+  seo_translations?: ProductSeoTranslationDto[];
   specifications?: JewellerySpecificationsDto | null;
   product_type: ProductType;
   jewellery_type: string | null;

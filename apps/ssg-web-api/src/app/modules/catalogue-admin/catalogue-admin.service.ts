@@ -17,6 +17,7 @@ const DICTIONARY_SELECT = {
 } satisfies Prisma.DictionaryEntrySelect;
 const TRANSLATIONS_SELECT = {
   locale: true, name: true, description: true,
+  seoTitle: true, seoDescription: true, ogImageId: true,
 } satisfies Prisma.ProductTranslationSelect;
 const REVISION_SELECT = {
   specifications: true,
@@ -284,6 +285,12 @@ export class CatalogueAdminService {
     const bg = revision.from_ProductTranslation_revisionId.find((text) => text.locale === 'bg');
     const en = revision.from_ProductTranslation_revisionId.find((text) => text.locale === 'en');
     return {
+      seo_translations: revision.from_ProductTranslation_revisionId.map((text) => ({
+        locale: text.locale,
+        seo_title: text.seoTitle,
+        seo_description: text.seoDescription,
+        og_image_id: text.ogImageId,
+      })),
       product_type: productType, jewellery_type: revision.jewelleryTypeIdRelation?.code ?? null,
       name_bg: bg?.name ?? null, name_en: en?.name ?? null,
       description_bg: bg?.description ?? null, description_en: en?.description ?? null,
@@ -353,6 +360,11 @@ export class CatalogueAdminService {
     const release = revision.mediaReleaseIdRelation;
     if (!release || release.productId !== productId || !release.approved) add('media_release_id', 'MEDIA_NOT_READY');
     const images = revision.from_RevisionImage_revisionId;
+    for (const text of draft.seo_translations ?? []) {
+      if (text.og_image_id && !draft.image_ids.includes(text.og_image_id)) {
+        add(`seo_translations.${text.locale}.og_image_id`, 'MEDIA_NOT_READY');
+      }
+    }
     if (!images.length || images[0]?.sortOrder !== 1 || images[0]?.assetIdRelation.role !== 'main' ||
       images.filter((image) => image.assetIdRelation.role === 'main').length !== 1) add('image_ids', 'MEDIA_NOT_READY');
     for (const [index, image] of images.entries()) {
