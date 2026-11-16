@@ -11,6 +11,8 @@ export interface CapturedMail {
   subject: string;
   html: string;
   text: string;
+  fromName?: string;
+  replyTo?: string;
 }
 
 export class MailCaptureError extends Error {
@@ -44,6 +46,8 @@ export class LocalMailCaptureService {
       /[\r\n]/.test(mail.recipient) ||
       !mail.subject ||
       /[\r\n]/.test(mail.subject) ||
+      (mail.fromName !== undefined && (!mail.fromName.trim() || /[\r\n]/.test(mail.fromName))) ||
+      (mail.replyTo !== undefined && (!isEmail(mail.replyTo) || /[\r\n]/.test(mail.replyTo))) ||
       Buffer.byteLength(JSON.stringify(mail), 'utf8') > 1024 * 1024
     ) {
       throw new MailCaptureError('MAIL_INVALID');
