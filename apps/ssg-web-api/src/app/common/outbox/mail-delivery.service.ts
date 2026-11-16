@@ -69,8 +69,9 @@ export class MailDeliveryService {
     const messageId = `<${createHash("sha256").update(key).digest("hex")}@ssg-web-api.invalid>`;
     try {
       const result = await transporter.sendMail({
-        from,
+        from: mail.fromName ? { name: mail.fromName, address: from } : from,
         to: recipient,
+        ...(mail.replyTo ? { replyTo: mail.replyTo } : {}),
         subject: mail.subject,
         text: mail.text,
         html: mail.html,
@@ -91,6 +92,8 @@ export class MailDeliveryService {
       /[\r\n]/.test(mail.recipient) ||
       !mail.subject ||
       /[\r\n]/.test(mail.subject) ||
+      (mail.fromName !== undefined && (!mail.fromName.trim() || /[\r\n]/.test(mail.fromName))) ||
+      (mail.replyTo !== undefined && (!isEmail(mail.replyTo) || /[\r\n]/.test(mail.replyTo))) ||
       Buffer.byteLength(JSON.stringify(mail), "utf8") > 1024 * 1024
     ) {
       throw new MailDeliveryError("MAIL_INVALID");

@@ -9,6 +9,7 @@ import {
   ServiceUnavailableException,
   UnauthorizedException,
 } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { createHash } from 'node:crypto';
 import { isEmail, isUUID } from 'class-validator';
 import { Prisma } from '../../../generated/prisma/client';
@@ -19,6 +20,7 @@ import { PrismaService } from '../../database/prisma.service';
 import type { AdminEnquiryQueryDto, EnquiryContextDto, EnquirySubmitDto } from './enquiry.dto';
 import { routeRegistry } from '../../common/publication/route-registry';
 import { enquiryTopics } from './enquiry-topics';
+import { configurationUrl, projectMedia } from '../products/product-read.service';
 
 interface EnquiryReceipt {
   state: 'received';
@@ -32,7 +34,13 @@ type EntitySnapshot = {
   url: string;
   product_type?: 'jewellery' | 'loose_stone';
   model_codes?: string[];
+  image_url?: string;
+  public_codes?: string[];
 };
+
+function isJsonRecord(value: Prisma.JsonValue): value is Prisma.JsonObject {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
 
 function invalidField(field: string, reason: string): never {
   throw new BadRequestException({
@@ -49,6 +57,7 @@ export class EnquiryService {
     private readonly prisma: PrismaService,
     private readonly transactions: TransactionService,
     private readonly outbox: OutboxService,
+    private readonly config: ConfigService,
   ) {}
 
   async submit(
@@ -325,9 +334,32 @@ export class EnquiryService {
         select: {
           id: true, ssgId: true, productType: true,
           currentRevisionIdRelation: {
-            select: { from_ProductTranslation_revisionId: {
-              where: { locale: language }, select: { name: true },
-            } },
+            select: {
+              mediaReleaseId: true,
+              from_RevisionImage_revisionId: {
+                where: { assetIdRelation: { role: 'main' } },
+                orderBy: { sortOrder: 'asc' },
+                take: 1,
+                select: {
+                  assetIdRelation: {
+                    select: {
+                      id: true, releaseId: true, logicalImageId: true, role: true,
+                      derivatives: true, altBg: true, altEn: true,
+                      processedWithAi: true, onModelIllustrative: true, reviewStatus: true,
+                    },
+                  },
+                },
+              },
+              from_ProductTranslation_revisionId: {
+                where: { locale: language }, select: { name: true },
+              },
+            },
+          },
+          from_StockItem_productId: {
+            where: { status: 'available' },
+            orderBy: { barcode: 'asc' },
+            take: 3,
+            select: { barcode: true },
           },
           from_PublicRoute_productId: {
             where: { locale: language, state: 'current' }, select: { path: true },
@@ -337,9 +369,29 @@ export class EnquiryService {
       const title = product?.currentRevisionIdRelation?.from_ProductTranslation_revisionId[0]?.name;
       const path = product?.from_PublicRoute_productId[0]?.path;
       if (!product || !title || !path) invalidField(field, 'unavailable');
+      const availableCodes = product.from_StockItem_productId.map((stock) => stock.barcode);
+      const publicCodes = availableCodes.length > 0 && availableCodes.length <= 2
+        ? availableCodes
+        : [product.ssgId];
+      const mainImage = product.currentRevisionIdRelation?.from_RevisionImage_revisionId[0];
+      const releaseId = product.currentRevisionIdRelation?.mediaReleaseId;
+      const imageUrl = mainImage && releaseId && this.config.get<string>('MEDIA_CDN_BASE_URL')
+        ? projectMedia(
+            mainImage.assetIdRelation,
+            language,
+            configurationUrl(
+              this.config,
+              'MEDIA_CDN_BASE_URL',
+              this.config.get<string>('NODE_ENV') === 'production',
+            ),
+            releaseId,
+          ).urls.w400
+        : null;
       return {
         type: 'product', id: product.id, title, url: path,
         model_codes: [product.ssgId], product_type: product.productType,
+        ...(imageUrl ? { image_url: imageUrl } : {}),
+        public_codes: publicCodes,
       };
     }
     if (context.type === 'content') {
@@ -349,7 +401,8 @@ export class EnquiryService {
         select: {
           id: true,
           from_ContentTranslation_contentId: {
-            where: { locale: language, published: true }, select: { title: true },
+            where: { locale: language, published: true },
+            select: { title: true, ogImageId: true, sections: true },
           },
           from_PublicRoute_contentId: {
             where: { locale: language, state: 'current' }, select: { path: true },
@@ -359,7 +412,17 @@ export class EnquiryService {
       const title = content?.from_ContentTranslation_contentId[0]?.title;
       const path = content?.from_PublicRoute_contentId[0]?.path;
       if (!content || !title || !path) invalidField(field, 'unavailable');
-      return { type: 'content', id: content.id, title, url: path };
+      const translation = content.from_ContentTranslation_contentId[0];
+      const imageId = translation
+        ? this.contentImageId(translation.ogImageId, translation.sections)
+        : null;
+      const imageUrl = imageId
+        ? await this.publicImageUrl(transaction, imageId, language)
+        : null;
+      return {
+        type: 'content', id: content.id, title, url: path,
+        ...(imageUrl ? { image_url: imageUrl } : {}),
+      };
     }
     if (context.type === 'store') {
       const code = this.storeCode(context.id, `${field}.id`);
@@ -370,6 +433,77 @@ export class EnquiryService {
       return { type: 'store', id: code, title: code, url: route[language] };
     }
     return invalidField(field, 'invalid_type');
+  }
+
+  private contentImageId(
+    ogImageId: string | null,
+    sections: Prisma.JsonValue,
+  ): string | null {
+    if (ogImageId) return ogImageId;
+    if (!Array.isArray(sections)) return null;
+    for (const section of sections) {
+      if (!isJsonRecord(section)) continue;
+      if (section.kind === 'image' && typeof section.media_id === 'string') {
+        return section.media_id;
+      }
+      if (section.kind === 'link_cards' && Array.isArray(section.items)) {
+        for (const item of section.items) {
+          if (isJsonRecord(item) && typeof item.media_id === 'string') {
+            return item.media_id;
+          }
+        }
+      }
+    }
+    return null;
+  }
+
+  private async publicImageUrl(
+    transaction: Prisma.TransactionClient,
+    imageId: string,
+    language: Locale,
+  ): Promise<string | null> {
+    const selection = {
+      id: true,
+      releaseId: true,
+      logicalImageId: true,
+      role: true,
+      derivatives: true,
+      altBg: true,
+      altEn: true,
+      processedWithAi: true,
+      onModelIllustrative: true,
+      reviewStatus: true,
+    } as const;
+    const [asset, websiteAsset] = await Promise.all([
+      transaction.mediaAsset.findFirst({
+        where: {
+          id: imageId,
+          reviewStatus: 'approved',
+          releaseIdRelation: { is: { approved: true } },
+        },
+        select: selection,
+      }),
+      transaction.websiteMediaAsset.findFirst({
+        where: {
+          id: imageId,
+          reviewStatus: 'approved',
+          releaseIdRelation: { is: { approved: true } },
+        },
+        select: selection,
+      }),
+    ]);
+    const selectedAsset = asset ?? websiteAsset;
+    if (!selectedAsset || !this.config.get<string>('MEDIA_CDN_BASE_URL')) return null;
+    return projectMedia(
+      selectedAsset,
+      language,
+      configurationUrl(
+        this.config,
+        'MEDIA_CDN_BASE_URL',
+        this.config.get<string>('NODE_ENV') === 'production',
+      ),
+      selectedAsset.releaseId,
+    ).urls.w400;
   }
 
   private matchesRoute(pattern: string, path: string): boolean {
