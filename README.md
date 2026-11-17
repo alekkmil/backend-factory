@@ -101,6 +101,13 @@ reading the result and reconciliation, not by resubmitting or creating another
 order. A definitive failure directs the customer to support; automated payment
 retry/new attempts and a staff release UI are not implemented.
 
+If initiation fails before an attempt is committed (`attemptRef: null`), fix
+the server failure and repeat initiation with the original owner session,
+order reference and idempotency key. A rolled-back initiation does not consume
+the key or release the order's reservation. Do not create a replacement order.
+The terminal advisory lock uses `$executeRaw` because PostgreSQL returns `void`
+for the lock function, which Prisma cannot deserialize through `$queryRaw`.
+
 All callbacks must pass RSA-SHA256/PKCS#1 MAC_GENERAL verification and match
 the attempt, terminal, order, nonce, amount and EUR currency. Only
 `ACTION=0`, `RC=00` records payment. Signed evidence is append-only, duplicate
