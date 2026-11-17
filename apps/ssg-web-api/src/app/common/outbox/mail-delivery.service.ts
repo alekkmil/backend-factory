@@ -1,4 +1,4 @@
-import { Injectable } from "@nestjs/common";
+import { Injectable, Logger } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import { isEmail } from "class-validator";
 import { createHash } from "node:crypto";
@@ -20,6 +20,7 @@ export class MailDeliveryError extends Error {
 
 @Injectable()
 export class MailDeliveryService {
+  private readonly logger = new Logger(MailDeliveryService.name);
   private readonly transporter?: Transporter;
   private readonly smtpEnabled: boolean;
 
@@ -56,14 +57,24 @@ export class MailDeliveryService {
 
   async deliver(key: string, mail: CapturedMail): Promise<string> {
     this.validate(key, mail);
+    const production = this.config.get<string>("NODE_ENV") === "production";
+    const recipient = production ? mail.recipient : this.config.get<string>("MAIL_TO");
+    if (!recipient || !isEmail(recipient)) {
+      throw new MailDeliveryError("SMTP_CONFIGURATION_UNAVAILABLE");
+    }
+    const outgoing = {
+      ...mail,
+      recipient,
+      subject: production || mail.subject.startsWith("[DEV] ") ? mail.subject : `[DEV] ${mail.subject}`,
+    };
     if (!this.smtpEnabled) {
-      return this.capture.capture(key, mail);
+      if (production) throw new MailDeliveryError("SMTP_CONFIGURATION_UNAVAILABLE");
+      return this.capture.capture(key, outgoing);
     }
 
     const transporter = this.transporter;
     const from = this.config.get<string>("MAIL_FROM");
-    const recipient = this.config.get<string>("MAIL_TO");
-    if (!transporter || !from || !recipient) {
+    if (!transporter || !from || !recipient || (!production && !this.config.get<string>("MAIL_TO"))) {
       throw new MailDeliveryError("SMTP_CONFIGURATION_UNAVAILABLE");
     }
     const messageId = `<${createHash("sha256").update(key).digest("hex")}@ssg-web-api.invalid>`;
@@ -72,14 +83,14 @@ export class MailDeliveryService {
         from: mail.fromName ? { name: mail.fromName, address: from } : from,
         to: recipient,
         ...(mail.replyTo ? { replyTo: mail.replyTo } : {}),
-        subject: mail.subject,
+        subject: outgoing.subject,
         text: mail.text,
         html: mail.html,
         messageId,
       });
       return result.messageId;
-    } catch (e) {
-      console.log(e);
+    } catch {
+      this.logger.warn("SMTP delivery failed");
       throw new MailDeliveryError("SMTP_DELIVERY_FAILED");
     }
   }

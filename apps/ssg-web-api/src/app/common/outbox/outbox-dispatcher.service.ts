@@ -13,6 +13,7 @@ import { renderEnquiryMail } from './enquiry-mail-template';
 import type { EnquiryMailContext, EnquiryMailKind } from './enquiry-mail-template';
 import type { OutboxDispatchResult, OutboxJobHandler } from './outbox-handler';
 import type { ClaimedOutboxMessage } from './outbox.service';
+import { CheckoutOrderNotificationService } from './checkout-order-notification.service';
 
 export { OutboxDispatchError } from './outbox-handler';
 export type { OutboxDispatchResult, OutboxJobHandler } from './outbox-handler';
@@ -69,6 +70,7 @@ export class OutboxDispatcherService {
     private readonly prisma: PrismaService,
     private readonly mailDelivery: MailDeliveryService,
     private readonly orderNotifications: OrderNotificationService,
+    private readonly checkoutNotifications: CheckoutOrderNotificationService,
     private readonly config: ConfigService,
   ) {}
 
@@ -83,6 +85,20 @@ export class OutboxDispatcherService {
   }
 
   async dispatch(message: ClaimedOutboxMessage): Promise<OutboxDispatchResult> {
+    if (message.dedupeKey.startsWith('sandbox-access-lookup:') ||
+        ['sandbox-order-v1', 'sandbox-simulation-v1'].includes(message.templateVersion ?? '')) {
+      return { outcome: 'suppressed', safeError: 'LEGACY_SANDBOX_JOB' };
+    }
+    if (message.kind === 'customer_access_lookup' &&
+        message.dedupeKey.startsWith('checkout-access-lookup:')) {
+      return this.checkoutNotifications.dispatchLookup(message);
+    }
+    if (
+      message.templateVersion === 'checkout-order-v1' &&
+      (message.kind === 'customer_payment_received' || message.kind === 'customer_order_access')
+    ) {
+      return this.checkoutNotifications.dispatchMail(message);
+    }
     if (message.kind === 'inquiry_received') {
       return this.deliverInquiry(message);
     }

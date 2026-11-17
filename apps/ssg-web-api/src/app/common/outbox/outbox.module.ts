@@ -7,6 +7,7 @@ import { OrderNotificationService } from './order-notification.service';
 import { OutboxDispatcherService } from './outbox-dispatcher.service';
 import { OutboxService } from './outbox.service';
 import { OutboxWorkerService } from './outbox-worker.service';
+import { CheckoutOrderNotificationService } from './checkout-order-notification.service';
 
 @Module({
   imports: [PrismaModule, TransactionModule],
@@ -17,6 +18,7 @@ import { OutboxWorkerService } from './outbox-worker.service';
     OrderNotificationService,
     OutboxDispatcherService,
     OutboxWorkerService,
+    CheckoutOrderNotificationService,
   ],
   exports: [
     OutboxService,

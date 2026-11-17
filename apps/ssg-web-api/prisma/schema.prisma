@@ -161,6 +161,11 @@ enum PaymentTiming {
   on_receipt
 }
 
+enum SandboxPaymentStatus {
+  pending
+  paid
+}
+
 enum AttemptState {
   pending
   committed
@@ -780,6 +785,7 @@ model Order {
   policyVersionId                String             @db.Uuid
   locale                         Locale
   status                         OrderStatus        @default(received)
+  sandbox                        Boolean            @default(false)
   version                        Int                @default(1)
   customer                       Json
   fulfilment                     Json
@@ -805,6 +811,8 @@ model Order {
   from_Acceptance_orderId        Acceptance?        @relation("Acceptance_orderId")
   from_PaymentOperation_orderId  PaymentOperation[] @relation("PaymentOperation_orderId")
   from_AccessGrant_orderId       AccessGrant[]      @relation("AccessGrant_orderId")
+  sandboxPaymentAttempt          SandboxPaymentAttempt?
+  bankPaymentAttempt             BankPaymentAttempt?
 
   @@unique([number])
   @@index([guestId, createdAt])
@@ -838,8 +846,8 @@ model OrderLine {
   sortOrder                       Int
   unitPrice                       Decimal            @db.Decimal(12, 2)
   snapshot                        Json
-  reservationReference            String             @db.VarChar(128)
-  reservedLocation                LocationCode
+  reservationReference            String?            @db.VarChar(128)
+  reservedLocation                LocationCode?
   decision                        LineDecision       @default(pending)
   decisionReason                  RestrictionReason?
   decisionNote                    String?            @db.VarChar(2000)
@@ -849,7 +857,7 @@ model OrderLine {
   stockItemIdRelation             StockItem          @relation("OrderLine_stockItemId", fields: [stockItemId], references: [id], onDelete: Restrict)
   productIdRelation               Product            @relation("OrderLine_productId", fields: [productId], references: [id], onDelete: Restrict)
   assetIdRelation                 MediaAsset         @relation("OrderLine_assetId", fields: [assetId], references: [id], onDelete: Restrict)
-  reservedLocationRelation        Store              @relation("OrderLine_reservedLocation", fields: [reservedLocation], references: [code], onDelete: Restrict)
+  reservedLocationRelation        Store?             @relation("OrderLine_reservedLocation", fields: [reservedLocation], references: [code], onDelete: Restrict)
   decidedByIdRelation             Principal?         @relation("OrderLine_decidedById", fields: [decidedById], references: [id], onDelete: Restrict)
   from_StoreCheck_lineId          StoreCheck?        @relation("StoreCheck_lineId")
   from_AcceptanceLine_orderLineId AcceptanceLine?    @relation("AcceptanceLine_orderLineId")
@@ -857,6 +865,83 @@ model OrderLine {
   @@unique([orderId, stockItemId])
   @@unique([orderId, sortOrder])
   @@index([stockItemId])
+}
+
+model SandboxPaymentAttempt {
+  id              String               @id @default(uuid()) @db.Uuid
+  orderId         String               @unique @db.Uuid
+  gatewaySequence Int                  @unique @default(autoincrement())
+  terminal        String               @db.VarChar(8)
+  nonce           String               @unique @db.VarChar(32)
+  requestTimestamp String              @db.VarChar(14)
+  formFields      Json
+  amount          Decimal              @db.Decimal(12, 2)
+  currency        String               @db.VarChar(3)
+  status          SandboxPaymentStatus @default(pending)
+  paidAt          DateTime?            @db.Timestamptz(3)
+  createdAt       DateTime             @default(now()) @db.Timestamptz(3)
+  updatedAt       DateTime             @updatedAt @db.Timestamptz(3)
+  order           Order                @relation(fields: [orderId], references: [id], onDelete: Restrict)
+  events          SandboxPaymentEvent[]
+}
+
+model SandboxPaymentEvent {
+  id         String                @id @default(uuid()) @db.Uuid
+  attemptId  String                @db.Uuid
+  eventHash  String                @db.VarChar(64)
+  evidence   Json
+  createdAt  DateTime              @default(now()) @db.Timestamptz(3)
+  attempt    SandboxPaymentAttempt @relation(fields: [attemptId], references: [id], onDelete: Restrict)
+
+  @@unique([attemptId, eventHash])
+}
+
+enum BankPaymentOutcome {
+  pending
+  paid
+  failed
+}
+
+model BankPaymentAttempt {
+  id                   String             @id @default(uuid()) @db.Uuid
+  orderId              String             @unique @db.Uuid
+  gatewaySequence      BigInt             @unique @default(autoincrement())
+  bankOrder            String             @db.VarChar(6)
+  terminal             String             @db.VarChar(8)
+  gatewayUrl           String             @db.VarChar(255)
+  nonce                String             @unique @db.VarChar(32)
+  requestTimestamp     String             @db.VarChar(14)
+  formFields           Json
+  amount               Decimal            @db.Decimal(12, 2)
+  currency             String             @db.VarChar(3)
+  outcome              BankPaymentOutcome @default(pending)
+  paidAt               DateTime?          @db.Timestamptz(3)
+  lastReconciledAt     DateTime?          @db.Timestamptz(3)
+  nextReconcileAt     DateTime?          @db.Timestamptz(3)
+  reconcileLeaseUntil DateTime?          @db.Timestamptz(3)
+  notificationQueuedAt DateTime?         @db.Timestamptz(3)
+  customerMessage      String?           @db.VarChar(1024)
+  manualReviewRequired Boolean           @default(false)
+  createdAt            DateTime           @default(now()) @db.Timestamptz(3)
+  updatedAt            DateTime           @updatedAt @db.Timestamptz(3)
+  order                Order              @relation(fields: [orderId], references: [id], onDelete: Restrict)
+  events               BankPaymentEvent[]
+
+  @@index([terminal, bankOrder, createdAt])
+  @@index([outcome, nextReconcileAt])
+  @@index([outcome, notificationQueuedAt, updatedAt])
+}
+
+model BankPaymentEvent {
+  id        String             @id @default(uuid()) @db.Uuid
+  attemptId String             @db.Uuid
+  eventHash String             @db.VarChar(64)
+  source    String             @db.VarChar(16)
+  evidence  Json
+  createdAt DateTime           @default(now()) @db.Timestamptz(3)
+  attempt   BankPaymentAttempt @relation(fields: [attemptId], references: [id], onDelete: Restrict)
+
+  @@unique([attemptId, eventHash])
 }
 
 model Inquiry {
