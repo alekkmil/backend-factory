@@ -16,6 +16,7 @@ import type {
 import { PrismaService } from '../../database/prisma.service';
 import { isGenuineBarcode } from '../../common/stock-facts/barcode';
 import { readDerivative } from '../products/product-read.service';
+import { parseSpecifications, specificationCodes } from '../../common/jewellery-specifications';
 import {
   ImportImageRowDto,
   ImportLegacyLinkRowDto,
@@ -115,6 +116,7 @@ const EXISTING_PRODUCT_SELECT = {
   productType: true,
   currentRevisionIdRelation: {
     select: {
+      specifications: true,
       jewelleryTypeIdRelation: { select: { code: true } },
       materialsState: true,
       gemstonesState: true,
@@ -1452,6 +1454,19 @@ export class CatalogueImportService {
       for (const [offset, code] of (product.gemstone_codes ?? []).entries()) {
         check('gemstone', code, 'Products', row, `gemstone_codes.${offset}`, ssgId);
       }
+      if (product.specifications != null) {
+        try {
+          const specifications = parseSpecifications(product.specifications);
+          if (specifications) {
+            for (const entry of specificationCodes(specifications)) {
+              check(entry.group, entry.code, 'Products', row, 'specifications', ssgId, entry.appliesTo);
+            }
+          }
+        } catch (error) {
+          if (!(error instanceof BadRequestException)) throw error;
+          addError('Products', row, 'specifications', 'SPECIFICATIONS_INVALID', ssgId);
+        }
+      }
     });
     data.materials.forEach((material, index) => {
       const row = index + 1;
@@ -1727,6 +1742,7 @@ function buildDiff(
     ]) ?? [],
   );
   const actual: Record<string, unknown> = {
+    specifications: revision?.specifications ?? null,
     product_type: existing.productType,
     jewellery_type: revision?.jewelleryTypeIdRelation?.code ?? null,
     name_bg: translations.get('bg')?.name ?? null,
@@ -1757,6 +1773,7 @@ function buildDiff(
         ) ?? [],
   };
   const desired: Record<string, unknown> = {
+    specifications: input.specifications,
     product_type: input.product_type,
     jewellery_type: input.jewellery_type,
     name_bg: input.name_bg,

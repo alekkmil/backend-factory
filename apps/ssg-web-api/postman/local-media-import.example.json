@@ -10,6 +10,31 @@
         "description_bg": "Тестов продукт за локална проверка на каталога.",
         "description_en": "Synthetic local catalogue fixture, not verified stock or media.",
         "materials_state": "known",
+        "specifications": {
+          "materials": [
+            {
+              "material_code": "gold",
+              "colour_code": "black",
+              "fineness_code": "gold_585",
+              "gold_karat_code": "14"
+            }
+          ],
+          "components": [
+            {
+              "key": "clasp",
+              "name_bg": "Закопчалка",
+              "name_en": "Clasp",
+              "materials": [
+                {
+                  "material_code": "gold",
+                  "colour_code": "black",
+                  "fineness_code": "gold_585",
+                  "gold_karat_code": "14"
+                }
+              ]
+            }
+          ]
+        },
         "gemstones_state": "known",
         "requested_sales_mode": "enquiry_only",
         "requested_price_visibility": "hidden",
