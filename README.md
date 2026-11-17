@@ -70,6 +70,12 @@ rotation together with outstanding encrypted access grants.
 Configure the terminal BACKREF as the externally reachable
 `POST /api/payments/borica/callback` for this deployment/database.
 
+Checkout terms links use the same validated, localized route projection as the
+public policy endpoint. Legacy policy URLs retain their stored origin in the
+immutable record, but responses use `PUBLIC_SITE_ORIGIN`; malformed URLs and
+incorrect policy paths remain unavailable. New policy publication still requires
+the current configured origin.
+
 Enable `OUTBOX_WORKER_ENABLED` and configure SMTP. Non-production mail subjects
 have `[DEV]` prefixes and all recipients are redirected to `MAIL_TO`, including
 access links. Private local capture also requires `MAIL_TO`. Production sends

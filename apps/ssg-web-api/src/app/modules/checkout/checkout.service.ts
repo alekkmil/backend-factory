@@ -11,10 +11,8 @@ import {
   hashIdempotencyPayload,
   TransactionService,
 } from '../../common/transactions/transaction.service';
-import {
-  configurationUrl,
-  ProductReadService,
-} from '../products/product-read.service';
+import { ProductReadService } from '../products/product-read.service';
+import { PublicContentService } from '../public-content/public-content.service';
 import type { CreateCheckoutQuoteDto } from './checkout.dto';
 import {
   checkoutConflict,
@@ -29,6 +27,7 @@ export class CheckoutService {
     private readonly transactions: TransactionService,
     private readonly products: ProductReadService,
     private readonly evaluator: CommercialEvaluator,
+    private readonly publicContent: PublicContentService,
   ) {}
 
   async quote(guestId: string, input: CreateCheckoutQuoteDto) {
@@ -177,14 +176,7 @@ export class CheckoutService {
         });
       }
       const policy = policies[0];
-      const origin = configurationUrl(this.config, 'PUBLIC_SITE_ORIGIN', false);
-      const termsUrl = new URL(policy.url, origin);
-      if (termsUrl.origin !== origin.origin || termsUrl.username || termsUrl.password) {
-        throw new ServiceUnavailableException({
-          code: 'TEMPORARILY_UNAVAILABLE',
-          message_key: 'errors.temporary_unavailable',
-        });
-      }
+      const termsUrl = this.publicContent.policyUrl(policy.url, 'terms', input.locale);
       const customer = {
         firstName: input.contact.firstName,
         lastName: input.contact.lastName,
@@ -256,7 +248,7 @@ export class CheckoutService {
         items: publicItems,
         contact: input.contact,
         receiving: fulfilment,
-        terms: { version: policy.versionLabel, title: policy.title, url: termsUrl.toString() },
+        terms: { version: policy.versionLabel, title: policy.title, url: termsUrl },
         money: {
           currency: 'EUR',
           subtotalMinor: Number(totalMinor),
