@@ -1190,6 +1190,22 @@ codes are accepted, with `applies_to` checked where the parent material/stone
 is known. The migration adds starter choices, not an exhaustive vocabulary.
 The existing dictionary maintenance mechanism can add more choices.
 
+The `20261117160000_add_black_material_colour` migration adds the active
+`material_colour` code `black`, labelled `Черно` / `Black`. Black gold remains
+`material_code: "gold"` with `colour_code: "black"` in
+`specifications.materials` or `specifications.components[].materials`.
+Use the item's actual fineness and karat codes (for example `gold_585` and `14`
+only for a 585/14-karat item); colour never changes or infers metal purity.
+
+Catalogue imports also accept optional `data.products[].specifications`, using
+the same shape and active/applicable dictionary validation as draft saving.
+Import preflight reports invalid codes, and commitment revalidates them before
+persisting the structured revision snapshot. Omission preserves an existing
+draft/current revision's specifications; `null` clears them. Public responses
+expose localized `{code,label}` objects, including `materials[].colour` and
+`components[].materials[].colour`; the legacy top-level materials contract
+does not gain a colour field.
+
 Complete draft-save example (replace the product URL, `expected_version` and
 request UUID with current values). For an existing draft, copy its current
 fields, image UUIDs and fulfilment configuration instead of replacing them

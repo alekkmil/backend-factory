@@ -25,6 +25,9 @@ import type {
 } from '../../../generated/prisma/enums';
 import { PrismaService } from '../../database/prisma.service';
 import { isGenuineBarcode } from '../../common/stock-facts/barcode';
+import {
+  parseSpecifications, specificationDictionary, specificationsJson,
+} from '../../common/jewellery-specifications';
 import type {
   ImportCommitRequestDto,
   ImportProductPayloadDto,
@@ -520,6 +523,7 @@ export class CatalogueImportCommitService {
 
     const revisionDefaultsSelect = {
       id: true,
+      specifications: true,
       revisionNumber: true,
       jewelleryTypeId: true,
       salesMode: true,
@@ -551,6 +555,20 @@ export class CatalogueImportCommitService {
         })
       : null;
     const baseRevision = revisionDraft ?? currentRevision;
+    let specifications: Prisma.InputJsonObject | typeof Prisma.DbNull;
+    try {
+      const parsed = parseSpecifications(input.specifications === undefined
+        ? baseRevision?.specifications : input.specifications);
+      if (parsed) await specificationDictionary(transaction, [parsed]);
+      specifications = parsed ? specificationsJson(parsed) : Prisma.DbNull;
+    } catch (error) {
+      if (!(error instanceof BadRequestException)) throw error;
+      const response = error.getResponse();
+      const code = typeof response === 'object' && response !== null &&
+        'code' in response && typeof response.code === 'string'
+        ? response.code : 'SPECIFICATIONS_INVALID';
+      throw new CommitFailure('specifications', code, 'errors.validation');
+    }
     const salesMode = hasBarcode
       ? parseSalesMode(input.requested_sales_mode ?? baseRevision?.salesMode)
       : 'archive_catalogue';
@@ -584,6 +602,7 @@ export class CatalogueImportCommitService {
         });
 
     const revisionData = {
+      specifications,
       jewelleryTypeId:
         input.jewellery_type === undefined
           ? baseRevision?.jewelleryTypeId ?? null

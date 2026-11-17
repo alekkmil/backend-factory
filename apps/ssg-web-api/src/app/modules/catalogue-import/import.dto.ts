@@ -1,4 +1,5 @@
 import { Type } from 'class-transformer';
+import { JewellerySpecificationsDto } from '../../common/jewellery-specifications';
 import {
   ArrayMaxSize,
   ArrayMinSize,
@@ -19,6 +20,11 @@ import {
 } from 'class-validator';
 
 class ImportProductFieldsDto {
+  @ValidateIf((_, value: unknown) => value !== undefined && value !== null)
+  @ValidateNested()
+  @Type(() => JewellerySpecificationsDto)
+  specifications?: JewellerySpecificationsDto | null;
+
   @IsOptional()
   @IsString()
   @MaxLength(80)
