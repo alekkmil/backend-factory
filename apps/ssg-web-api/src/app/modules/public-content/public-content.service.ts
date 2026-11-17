@@ -2728,7 +2728,7 @@ export class PublicContentService {
     return routeUrl(route[locale], this.siteOrigin());
   }
 
-  private policyUrl(
+  policyUrl(
     value: string, kind: PolicyKind, locale: Locale, requireCurrentOrigin = false,
   ): string {
     const origin = this.siteOrigin();

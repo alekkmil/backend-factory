@@ -13,6 +13,7 @@ import { OrdersService } from "./orders.service";
 import { OrderAccessController } from "./order-access.controller";
 import { OrderAccessService } from "./order-access.service";
 import { StockFactModule } from "../../common/stock-facts/stock-fact.module";
+import { PublicContentModule } from "../public-content/public-content.module";
 
 @Module({
   imports: [
@@ -23,6 +24,7 @@ import { StockFactModule } from "../../common/stock-facts/stock-fact.module";
     GuestSessionModule,
     ProductReadModule,
     StockFactModule,
+    PublicContentModule,
   ],
   controllers: [CheckoutController, OrdersController, OrderAccessController],
   providers: [
