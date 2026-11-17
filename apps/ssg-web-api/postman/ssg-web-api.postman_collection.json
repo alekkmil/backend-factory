@@ -2,7 +2,7 @@
   "info": {
     "_postman_id": "c70e9263-113e-44d2-8b14-bd9a1f1960f8",
     "name": "SSG Web API - Implemented Endpoints",
-    "description": "Implemented public catalogue/product endpoints, search (113), guest enquiries (116/117), admin catalogue reads (134/135), and catalogue import preflight (138). Set baseUrl and frontendOrigin. Run guest bootstrap first for enquiries; it saves guestCsrfToken and sets a Secure cookie, requiring HTTPS outside supported localhost clients. Preserve enquiryRequestId and the exact payload on retries; regenerate it only for an intentional new submission. Email notifications use durable private dev capture, not real delivery. Admin drafts do not require published stock/media. Dev staff authentication requires explicit opt-in, two 32+ character secrets and appropriate live staff permissions; it is rejected in production. Import accepts nested product JSON with backend-generated SSG IDs, not XLSX uploads; public endpoints exclude drafts.",
+    "description": "Implemented public catalogue/product endpoints, search, guest enquiries, verified BORICA checkout, one-order access, admin catalogue and website editing, and catalogue imports. Set baseUrl (without /api) and frontendOrigin. Run guest bootstrap first for protected customer requests; it saves guestCsrfToken and sets a Secure cookie, requiring HTTPS outside supported localhost clients. Preserve idempotency keys and exact payloads on retries. Checkout uses guest auth, never staff tokens. Read the Checkout and payments folder instructions before committing an order: commitment reserves stock with no automatic release, and payment initiation returns a hosted form only once. Do not run this entire collection unattended against live data. Outside production, email subjects use [DEV] and recipients are redirected to MAIL_TO, through configured SMTP or private capture; production uses actual recipients. Never share saved responses containing bank forms or access tokens. Admin drafts do not require published stock/media. Dev staff authentication requires explicit opt-in, two 32+ character secrets and appropriate live staff permissions; it is rejected in production. Import accepts nested product JSON with backend-generated SSG IDs, not XLSX uploads; public endpoints exclude drafts.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "variable": [
@@ -103,7 +103,24 @@
     { "key": "websitePolicyVersion", "value": "v1", "type": "string" },
     { "key": "websiteExpectedCurrentVersion", "value": "null", "type": "string" },
     { "key": "websiteSiteOrigin", "value": "http://localhost:3000", "type": "string" },
-    { "key": "websiteMediaRequestId", "value": "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee", "type": "string" }
+    { "key": "websiteMediaRequestId", "value": "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee", "type": "string" },
+    { "key": "checkoutUnitId", "value": "", "type": "string" },
+    { "key": "checkoutEmail", "value": "qa@example.com", "type": "string" },
+    { "key": "checkoutPhone", "value": "+359888000000", "type": "string" },
+    { "key": "checkoutLocality", "value": "Sofia", "type": "string" },
+    { "key": "checkoutAddress", "value": "Test Street 1", "type": "string" },
+    { "key": "checkoutOffice", "value": "", "type": "string" },
+    { "key": "quoteId", "value": "", "type": "string" },
+    { "key": "quoteVersion", "value": "", "type": "string" },
+    { "key": "quoteExpiresAt", "value": "", "type": "string" },
+    { "key": "acceptedTermsVersion", "value": "", "type": "string" },
+    { "key": "orderCommitKey", "value": "", "type": "string" },
+    { "key": "paymentKey", "value": "", "type": "string" },
+    { "key": "orderRef", "value": "", "type": "string" },
+    { "key": "orderNumber", "value": "", "type": "string" },
+    { "key": "attemptRef", "value": "", "type": "string" },
+    { "key": "orderAccessRequestId", "value": "", "type": "string" },
+    { "key": "grantToken", "value": "", "type": "string" }
   ],
   "item": [
     {
@@ -170,6 +187,334 @@
       ]
     },
     {
+      "name": "Checkout and payments",
+      "description": "Manual sequence: bootstrap Guest session, inspect eligible exact units, create ONE quote for the chosen receiving method, review returned terms/totals, commit, initiate payment once, then read result/order. Set checkoutUnitId from product.stock_choices[].stock_item_id, not productId; selection is deliberately manual. Set real test contact and receiving values. Only published, online-enabled, available EUR jewellery compatible with fulfilment is payable; quantity is exactly 1 per distinct unit and aggregate total is <=200000 cents with zero delivery. Quotes do not reserve; commitment reserves all units indefinitely, including abandonment/decline: manual staff recovery is required. Commit sends accepted:true and represents explicit acceptance of the returned terms: review them before clicking Send. Keys are generated only if empty and retained on retries. For an intentional NEW order, first resolve any prior order/payment, then clear orderCommitKey, paymentKey, orderRef, orderNumber and attemptRef and create a fresh quote. Never rotate keys to recover an unknown timeout. One payment attempt per order; replay returns current result without another form. Hosted-bank navigation must be tested in a browser using the frontend's native form submission, not Postman AJAX or an unsigned callback. This folder does not simulate payment, collect card data, auto-submit bank forms or auto-redeem email links. DEV must have matching migrations/config and an externally reachable BORICA BACKREF using the order's database. Outside production all emails go to MAIL_TO with [DEV]. Use sandbox credentials/cards only on the test gateway. Never export responses/history containing signed bank fields. Browser FE uses credentials:include plus X-CSRF-Token, including GETs; Postman uses its cookie jar plus explicit approved Origin. Browser cross-site cookies require SameSite=None and may still be blocked.",
+      "item": [
+        {
+          "name": "Inspect eligible exact units for Sofia pickup",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/products/{{productId}}?locale={{locale}}&fulfilment_method=store_pickup&pickup_location_code=sofia",
+            "description": "Choose a stock_choices entry and copy stock_item_id to checkoutUnitId. No automatic first-unit selection or unit replacement. For delivery use fulfilment_method=delivery and the actual locality_id where applicable. Checkout currently requires Bulgaria-wide delivery eligibility, not selected-locality-only delivery. No eligible units means this product cannot be used for this receiving method."
+          },
+          "response": []
+        },
+        {
+          "name": "Create quote - Sofia pickup",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "['quoteId', 'quoteVersion', 'quoteExpiresAt', 'acceptedTermsVersion'].forEach(key => pm.collectionVariables.unset(key));",
+                  "if (pm.response.code === 201) {",
+                  "  const quote = pm.response.json();",
+                  "  if (quote.payable === true) {",
+                  "    pm.collectionVariables.set('quoteId', quote.quoteId);",
+                  "    pm.collectionVariables.set('quoteVersion', quote.quoteVersion);",
+                  "    pm.collectionVariables.set('quoteExpiresAt', quote.expiresAt);",
+                  "    pm.collectionVariables.set('acceptedTermsVersion', quote.terms.version);",
+                  "  }",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Origin", "value": "{{frontendOrigin}}" },
+              { "key": "X-CSRF-Token", "value": "{{guestCsrfToken}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"items\": [{ \"unitId\": \"{{checkoutUnitId}}\", \"quantity\": 1 }],\n  \"contact\": { \"firstName\": \"Ivan\", \"lastName\": \"Petrov\", \"email\": \"{{checkoutEmail}}\", \"phone\": \"{{checkoutPhone}}\" },\n  \"cardholder\": { \"name\": \"Ivan Petrov\", \"email\": \"{{checkoutEmail}}\", \"billingAddress\": \"Test Street 1\" },\n  \"receiving\": { \"method\": \"store_pickup\", \"country\": \"BG\" },\n  \"locale\": \"{{locale}}\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": "{{baseUrl}}/api/checkout/quotes",
+            "description": "201/payable:true returns items/contact/receiving, terms {version,title,url}, money {currency,subtotalMinor,deliveryMinor,totalMinor}, limitMinor, quoteId/version/expiry; captures quote variables only, not order/payment keys. Review terms and authoritative amounts before commit. No reservation. Multiple units require distinct items each quantity:1. Above EUR 2000 returns 200 with payable:false, code:CART_TOTAL_LIMIT_EXCEEDED, limitMinor:200000,currency:EUR and no quote; capture clears stale quote variables. Pickup allows no delivery fields. Cardholder name must use Latin script (max 45), email max 254, billingAddress max 50; no PAN/expiry/CVV."
+          },
+          "response": []
+        },
+        {
+          "name": "Create quote - Econt address",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "['quoteId', 'quoteVersion', 'quoteExpiresAt', 'acceptedTermsVersion'].forEach(key => pm.collectionVariables.unset(key));",
+                  "if (pm.response.code === 201) {",
+                  "  const quote = pm.response.json();",
+                  "  if (quote.payable === true) {",
+                  "    pm.collectionVariables.set('quoteId', quote.quoteId);",
+                  "    pm.collectionVariables.set('quoteVersion', quote.quoteVersion);",
+                  "    pm.collectionVariables.set('quoteExpiresAt', quote.expiresAt);",
+                  "    pm.collectionVariables.set('acceptedTermsVersion', quote.terms.version);",
+                  "  }",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Origin", "value": "{{frontendOrigin}}" },
+              { "key": "X-CSRF-Token", "value": "{{guestCsrfToken}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"items\": [{ \"unitId\": \"{{checkoutUnitId}}\", \"quantity\": 1 }],\n  \"contact\": { \"firstName\": \"Ivan\", \"lastName\": \"Petrov\", \"email\": \"{{checkoutEmail}}\", \"phone\": \"{{checkoutPhone}}\" },\n  \"cardholder\": { \"name\": \"Ivan Petrov\", \"email\": \"{{checkoutEmail}}\", \"billingAddress\": \"Test Street 1\" },\n  \"receiving\": { \"method\": \"econt_address\", \"country\": \"BG\", \"recipientName\": \"Ivan Petrov\", \"phone\": \"{{checkoutPhone}}\", \"locality\": \"{{checkoutLocality}}\", \"address\": \"{{checkoutAddress}}\" },\n  \"locale\": \"{{locale}}\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": "{{baseUrl}}/api/checkout/quotes",
+            "description": "Alternative to pickup, not an additional required step. BG only, eligible exact unit, customer delivery fee zero. Do not send office with address. Same quote capture and non-payable behavior as pickup. Replaces captured quote variables; review this quote's terms/totals before commitment."
+          },
+          "response": []
+        },
+        {
+          "name": "Create quote - Econt office",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "['quoteId', 'quoteVersion', 'quoteExpiresAt', 'acceptedTermsVersion'].forEach(key => pm.collectionVariables.unset(key));",
+                  "if (pm.response.code === 201) {",
+                  "  const quote = pm.response.json();",
+                  "  if (quote.payable === true) {",
+                  "    pm.collectionVariables.set('quoteId', quote.quoteId);",
+                  "    pm.collectionVariables.set('quoteVersion', quote.quoteVersion);",
+                  "    pm.collectionVariables.set('quoteExpiresAt', quote.expiresAt);",
+                  "    pm.collectionVariables.set('acceptedTermsVersion', quote.terms.version);",
+                  "  }",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Origin", "value": "{{frontendOrigin}}" },
+              { "key": "X-CSRF-Token", "value": "{{guestCsrfToken}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"items\": [{ \"unitId\": \"{{checkoutUnitId}}\", \"quantity\": 1 }],\n  \"contact\": { \"firstName\": \"Ivan\", \"lastName\": \"Petrov\", \"email\": \"{{checkoutEmail}}\", \"phone\": \"{{checkoutPhone}}\" },\n  \"cardholder\": { \"name\": \"Ivan Petrov\", \"email\": \"{{checkoutEmail}}\", \"billingAddress\": \"Test Street 1\" },\n  \"receiving\": { \"method\": \"econt_office\", \"country\": \"BG\", \"recipientName\": \"Ivan Petrov\", \"phone\": \"{{checkoutPhone}}\", \"locality\": \"{{checkoutLocality}}\", \"office\": \"{{checkoutOffice}}\" },\n  \"locale\": \"{{locale}}\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": "{{baseUrl}}/api/checkout/quotes",
+            "description": "Alternative quote example. Set checkoutOffice to the actual selected office; no address field. BG only; customer delivery fee zero. Same quote capture/non-payable behavior as pickup. No Econt office search or transfer/split fulfilment is implied by this payload."
+          },
+          "response": []
+        },
+        {
+          "name": "Commit reviewed quote and reserve all units",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (!pm.collectionVariables.get('orderCommitKey')) {",
+                  "  pm.collectionVariables.set('orderCommitKey', pm.variables.replaceIn('{{$guid}}'));",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if ([200, 201].includes(pm.response.code)) {",
+                  "  const order = pm.response.json();",
+                  "  pm.collectionVariables.set('orderRef', order.orderRef);",
+                  "  pm.collectionVariables.set('orderNumber', order.orderNumber);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Origin", "value": "{{frontendOrigin}}" },
+              { "key": "X-CSRF-Token", "value": "{{guestCsrfToken}}" },
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Idempotency-Key", "value": "{{orderCommitKey}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"quoteId\": \"{{quoteId}}\",\n  \"quoteVersion\": {{quoteVersion}},\n  \"acceptedTermsVersion\": \"{{acceptedTermsVersion}}\",\n  \"accepted\": true\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": "{{baseUrl}}/api/orders",
+            "description": "Manual Send means explicit terms acceptance. Atomically revalidates and reserves all exact units or rolls back. 201 new / 200 matching replay returns orderRef, orderNumber, createdAt, nextAction:initiate_payment. Captures order identifiers. Retry timeouts with this SAME key and identical payload; changed payload returns 409 IDEMPOTENCY_CONFLICT. Never regenerate the key automatically. QUOTE_CHANGED, QUOTE_EXPIRED, TERMS_CHANGED, ITEM_UNAVAILABLE and CART_TOTAL_LIMIT_EXCEEDED block commitment. A new reviewed quote needs a new key only for an intentional new operation after resolving any previous unknown commitment."
+          },
+          "response": []
+        },
+        {
+          "name": "Initiate the one BORICA payment attempt",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (!pm.collectionVariables.get('paymentKey')) {",
+                  "  pm.collectionVariables.set('paymentKey', pm.variables.replaceIn('{{$guid}}'));",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if ([200, 201].includes(pm.response.code)) {",
+                  "  const payment = pm.response.json();",
+                  "  if (payment.attemptRef) pm.collectionVariables.set('attemptRef', payment.attemptRef);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Origin", "value": "{{frontendOrigin}}" },
+              { "key": "X-CSRF-Token", "value": "{{guestCsrfToken}}" },
+              { "key": "Idempotency-Key", "value": "{{paymentKey}}" }
+            ],
+            "url": "{{baseUrl}}/api/orders/{{orderRef}}/payment-attempts",
+            "description": "No body. First 201 returns attemptRef, outcome:pending, nextAction:submit_bank_form and form {method:POST,url,fields}. Capture saves ONLY attemptRef, never signed form fields. Submit every returned field unchanged as a native browser form ONCE, normally through the frontend flow. Do not AJAX-fetch the bank page or log/save/export the form. Sandbox URL is https://3dsgate-dev.borica.bg/cgi-bin/cgi_link outside production; no keys or card data belong in Postman. Existing/replayed attempts return 200 current result WITHOUT a form, even with a different key. A lost initial form response can require manual recovery; do not create another order/attempt. Backend verifies callbacks and runs inquiries; FE must not fake callbacks."
+          },
+          "response": []
+        },
+        {
+          "name": "Read authoritative payment result",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "Origin", "value": "{{frontendOrigin}}" },
+              { "key": "X-CSRF-Token", "value": "{{guestCsrfToken}}" }
+            ],
+            "url": "{{baseUrl}}/api/orders/{{orderRef}}/payment-result",
+            "description": "200 returns attemptRef (nullable), outcome:pending|paid|failed, bankVerified, totalMinor, currency:EUR, nextAction, and verifiedPaidMinor only when paid. nextAction check_result: pending; view_order: paid; contact_support: stop polling/no automated retry; back_to_review: no attempt. Browser redirects are not proof of payment. FE can poll conservatively (e.g. 10 seconds with backoff), respecting 429 Retry-After. Optional customerMessage/customerMessageVerified:false is unsigned bank text: render as untrusted text only, not HTML/links/actions or financial evidence. Bank failures/unknowns do not automatically release stock; paid is not automatic acceptance/dispatch."
+          },
+          "response": []
+        },
+        {
+          "name": "Read checkout owner's customer-safe order",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "Origin", "value": "{{frontendOrigin}}" },
+              { "key": "X-CSRF-Token", "value": "{{guestCsrfToken}}" }
+            ],
+            "url": "{{baseUrl}}/api/orders/{{orderRef}}",
+            "description": "Requires the SAME guest owner as order commitment. Returns orderNumber, createdAt, locale, items, money, payment, receiving and nextAction without internal stock/reservation identifiers or lifecycle status. A public orderNumber is a reference, never access authorization. After guest expiry use the emailed one-order access flow instead."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "One-order email access",
+      "description": "Use Guest session bootstrap and the cookie jar, approved Origin and guestCsrfToken. DEV messages go to MAIL_TO with [DEV]; production uses the stored recipient. A payment confirmation includes an access link; access-requests can request a replacement using orderNumber+email. The frontend removes #grant=<token> from the URL before exchange and redeems ONLY on explicit user action, never on page load/prefetch. Treat tokens as secrets: do not log, export or synchronize them. In Postman prefer a private/local environment value for grantToken; the committed collection default is blank. The cookie authorizes one order only. Do not run these requests unattended or put actual token values in source control.",
+      "item": [
+        {
+          "name": "Request an order-access email",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (!pm.collectionVariables.get('orderAccessRequestId')) {",
+                  "  pm.collectionVariables.set('orderAccessRequestId', pm.variables.replaceIn('{{$guid}}'));",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Origin", "value": "{{frontendOrigin}}" },
+              { "key": "X-CSRF-Token", "value": "{{guestCsrfToken}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"orderNumber\": \"{{orderNumber}}\",\n  \"email\": \"{{checkoutEmail}}\",\n  \"locale\": \"{{locale}}\",\n  \"requestId\": \"{{orderAccessRequestId}}\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": "{{baseUrl}}/api/customer-order/access-requests",
+            "description": "202 neutral message for matching and nonmatching number/email; never reveals existence. Matching lookup queues an access email asynchronously. Preserve requestId and payload on retry. Clear orderAccessRequestId only for an intentional new request (including changed number/email/locale). Does not authenticate using the public number alone."
+          },
+          "response": []
+        },
+        {
+          "name": "Explicitly exchange emailed grant for one-order cookie",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "  pm.collectionVariables.unset('grantToken');",
+                  "  pm.environment.unset('grantToken');",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Origin", "value": "{{frontendOrigin}}" },
+              { "key": "X-CSRF-Token", "value": "{{guestCsrfToken}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"grantToken\": \"{{grantToken}}\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": "{{baseUrl}}/api/customer-order/access-session",
+            "description": "Copy only the 43-character base64url token from the email link's #grant fragment into a private grantToken variable; click Send explicitly. 200 returns expiresAt and sets ssg_order_access, an HttpOnly Secure one-order cookie under /api/customer-order. Keep guest and access cookies in the same cookie jar. Single-use: replay/expired/revoked token returns ACCESS_INVALID. On success the capture script clears grantToken from collection/environment scope; also clear any higher-priority/private overrides and sensitive request history manually. No automatic redemption or saved token examples."
+          },
+          "response": []
+        },
+        {
+          "name": "Read the emailed link's customer-safe order",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "Origin", "value": "{{frontendOrigin}}" },
+              { "key": "X-CSRF-Token", "value": "{{guestCsrfToken}}" }
+            ],
+            "url": "{{baseUrl}}/api/customer-order",
+            "description": "Requires guest cookie+CSRF plus the exchanged one-order cookie bound to that guest. No order ID or public number is supplied. Returns only the linked customer-safe commercial snapshot. Missing/expired/wrong-guest cookie returns ACCESS_INVALID; it cannot enumerate or read another order."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
       "name": "Search and enquiries",
       "item": [
         {
@@ -207,7 +552,7 @@
               "options": { "raw": { "language": "json" } }
             },
             "url": "{{baseUrl}}/api/enquiries",
-            "description": "Bootstrap a guest first and retain its Secure cookie. Requires name, email and international phone for every request type. Message can be empty or omitted. Requires server-configured coordinatorEmail. Returns 201/new or 200/same-payload replay; changed payload with the same request ID returns 409. Keep opening_action/origin_route_id/origin_entity fixed when topic changes; context holds the final service or fixed product UUID. Similar requests require published jewellery product context. Notifications are queued for private dev capture, not real email delivery."
+            "description": "Bootstrap a guest first and retain its Secure cookie. Requires name, email and international phone for every request type. Message can be empty or omitted. Requires server-configured coordinatorEmail. Returns 201/new or 200/same-payload replay; changed payload with the same request ID returns 409. Keep opening_action/origin_route_id/origin_entity fixed when topic changes; context holds the final service or fixed product UUID. Similar requests require published jewellery product context. Notifications use configured SMTP or private capture; outside production all recipients are redirected to MAIL_TO with [DEV] subjects."
           },
           "response": []
         },
