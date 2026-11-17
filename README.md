@@ -25,30 +25,160 @@ database names and the legacy Docker Compose project/volume identity remain
 unchanged so existing imported products and database containers are reused.
 The Postman collection is `apps/ssg-web-api/postman/ssg-web-api.postman_collection.json`.
 
-### BORICA diagnostic callback
+### Verified BORICA checkout
 
-`POST /api/payments/borica/callback` accepts form-urlencoded fields without
-customer authentication and returns HTTP 200 with `{"received":true}`.
-Form parsing is limited to this callback path (16 KB, 64 parameters).
-Only allowlisted diagnostic fields are logged, with bounded printable values.
-Signatures, unknown fields and full request bodies are not logged.
+Development and production run the same customer checkout, reservation,
+signature verification, reconciliation and notification logic. Customer routes
+do not depend on `DEV_STAFF_AUTH_ENABLED`. The old `/api/dev/checkout` simulation
+and `/api/test-payment` routes have been removed. Legacy sandbox database rows
+are retained as history, excluded from customer reads and payments; old sandbox
+outbox jobs are suppressed rather than sent as real payment confirmations.
 
-This is an **unverified diagnostic endpoint**, not a payment integration:
-it does not verify `P_SIGN`, persist events, update the database, or mark orders
-paid. The response acknowledges receipt only. Do not rely on it for real
-payments; authenticated verification and reconciliation must be implemented
-against the merchant technical package first.
+Review and apply migrations through `20261117150000_add_verified_checkout` before
+enabling `CHECKOUT_ENABLED=true`. No migration is automatically run at startup.
+The new bank tables are separate from historical sandbox attempts/events.
+Existing paid/stock facts are never rewritten to retrofit the new policy.
 
-```sh
-curl -i http://localhost:3001/api/payments/borica/callback \
-  -H 'Content-Type: application/x-www-form-urlencoded' \
-  --data-urlencode 'ACTION=0' \
-  --data-urlencode 'RC=00' \
-  --data-urlencode 'ORDER=000123' \
-  --data-urlencode 'TERMINAL=TEST' \
-  --data-urlencode 'AMOUNT=10.00' \
-  --data-urlencode 'CURRENCY=EUR'
-```
+#### Configuration
+
+See [the application environment example](apps/ssg-web-api/.env.example).
+Configure explicit positive values for `CHECKOUT_QUOTE_TTL_SECONDS`,
+`ORDER_ACCESS_GRANT_TTL_SECONDS`, `ORDER_ACCESS_SESSION_TTL_SECONDS`,
+`ORDER_ACCESS_LOOKUP_TTL_SECONDS`, `PAYMENT_RECONCILE_INTERVAL_SECONDS`
+(5-3600 seconds) and `BORICA_REQUEST_TIMEOUT_MS` (1000-60000 ms).
+Quote/access TTLs are not reservation expiry policies.
+
+Set terminal/merchant ID/name, `BORICA_PRIVATE_KEY_BASE64` for outgoing signatures
+and `BORICA_GATEWAY_PUBLIC_KEY_BASE64` for gateway response verification.
+The latter must be base64 of the **complete official RSA-2048 PEM public key**,
+including its BEGIN/END lines, never the merchant private key or an archive.
+Startup validates both keys and rejects using the same key for signing and
+verification. Parsing establishes format, not provenance: operators must
+authenticate the bank's current environment-specific key and rotate it before
+the bank's rollover. A test key is not suitable for production.
+
+`BORICA_GATEWAY_URL` must be exactly:
+
+- Non-production: `https://3dsgate-dev.borica.bg/cgi-bin/cgi_link`
+- Production: `https://3dsgate.borica.bg/cgi-bin/cgi_link`
+
+Set `PUBLIC_SITE_ORIGIN`, `BORICA_BROWSER_RETURN_URL` and `ORDER_ACCESS_URL`;
+the latter two must share the public origin without credentials/query/fragment.
+Use HTTPS outside localhost. Configure a random base64-encoded 32-byte
+`ORDER_ACCESS_ENCRYPTION_KEY_BASE64`, retain it across restarts, and handle
+rotation together with outstanding encrypted access grants.
+Configure the terminal BACKREF as the externally reachable
+`POST /api/payments/borica/callback` for this deployment/database.
+
+Enable `OUTBOX_WORKER_ENABLED` and configure SMTP. Non-production mail subjects
+have `[DEV]` prefixes and all recipients are redirected to `MAIL_TO`, including
+access links. Private local capture also requires `MAIL_TO`. Production sends
+to the stored actual recipient without the prefix and requires SMTP plus the
+outbox worker when checkout is enabled; local mail capture is prohibited.
+SMTP is at-least-once: a deterministic Message-ID does not guarantee
+provider-side deduplication.
+
+#### Stock and payment policy
+
+Quotes do not reserve. Order commitment atomically revalidates all exact units,
+prices, fulfilment and terms and reserves every unit, or rolls back everything.
+Reservations use conditional stock updates and database constraints.
+Stock stays reserved indefinitely: there is **no automatic timeout or release**,
+including abandonment, browser closure, guest expiry and verified decline.
+Failed or unresolved orders require staff/manual recovery before release.
+No sale, acceptance, dispatch or automatic refund follows from payment alone.
+
+Initiation revalidates the committed order's own exact reservations and the
+EUR 2,000 ceiling. There is one attempt per order. Same/different-key replays
+return the current result, never another form. A lost response is recovered by
+reading the result and reconciliation, not by resubmitting or creating another
+order. A definitive failure directs the customer to support; automated payment
+retry/new attempts and a staff release UI are not implemented.
+
+All callbacks must pass RSA-SHA256/PKCS#1 MAC_GENERAL verification and match
+the attempt, terminal, order, nonce, amount and EUR currency. Only
+`ACTION=0`, `RC=00` records payment. Signed evidence is append-only, duplicate
+events are deduplicated, and paid outcomes are never downgraded.
+Callbacks redirect with HTTP 303 to the static frontend return URL; browser
+parameters/public order numbers are not proof or access credentials.
+
+The reconciliation worker uses the guide's section 6.2 `TRTYPE=90` request
+signature (TERMINAL, TRTYPE, ORDER, fresh NONCE), requests `TRAN_TRTYPE=1`,
+and verifies the signed response and request context. No browser is required.
+Negative responses remain unresolved until a matching status inquiry after
+the documented 15-minute GUARDTIME plus one-minute buffer. Missing/mismatched
+money, transport/signature errors and not-found responses never mean unpaid.
+After the bank's 24-hour inquiry window, unresolved attempts require manual
+review and retain stock. Workers use recoverable database leases.
+
+Late verified success is still recorded, even outside today's cart limit.
+Missing/conflicting reservations or success after a prior definitive failure
+raise controlled staff review without restoring sold stock or refunding.
+The financial transaction commits before notification preparation; the worker
+repairs missing notification intents without querying the bank again.
+
+The guide's token/RFU profile extensions fail closed. A bounded plain-text
+`CARDHOLDERINFO` is exposed as `customerMessage` with
+`customerMessageVerified: false`: it is not covered by the documented MAC.
+The frontend must display it as untrusted text only (no HTML, links, automatic
+actions or interpretation as payment evidence). Invalid messages are logged
+and omitted without discarding a verified financial event.
+Production readiness still requires bank/merchant acceptance tests, validated
+deployed credentials/key provenance, operational monitoring and manual recovery.
+
+#### Frontend sequence
+
+1. `POST /api/guest-session`; retain cookie and guest CSRF token.
+2. `POST /api/checkout/quotes` with the body below. Review authoritative totals
+   and terms; quote creation does not reserve stock.
+3. `POST /api/orders` with `quoteId`, `quoteVersion: 1`,
+   `acceptedTermsVersion`, `accepted: true` and a unique `Idempotency-Key`.
+4. `POST /api/orders/:orderRef/payment-attempts` with a unique `Idempotency-Key`
+   and no body. Save `orderRef` before navigating. Submit the first response's
+   `form.method`, `form.url` and hidden inputs for every `form.fields` entry
+   as a native HTML form once. Do not AJAX-fetch the bank page, log its signed
+   fields or collect card numbers/CVV in this application.
+5. On the frontend return page read
+   `GET /api/orders/:orderRef/payment-result`. Outcomes are `pending`, `paid`
+   or `failed`, with `nextAction` and, for paid, `verifiedPaidMinor`.
+   Do not infer success from navigation; stop polling on `contact_support`.
+6. Verified payment queues the BG/EN payment email and a one-time order-access
+   link. Exchange only after explicit user action as described below.
+
+The request contains `items` (`unitId`, `quantity: 1`), `contact` (`firstName`,
+`lastName`, `email`, `phone`), `cardholder` (`name` in Latin script, `email`,
+`billingAddress`), `receiving` and `locale`. Receiving uses `country: "BG"`
+and `method: "econt_address"`, `"econt_office"` or `"store_pickup"`. Delivery
+also requires `recipientName`, `phone`, `locality` and either `address` or
+`office`. Pickup has no delivery fields. The endpoint snapshots validated
+customer and cardholder details; do not send card numbers or security codes.
+
+Quotes enforce the inclusive EUR 2,000 aggregate ceiling and zero delivery
+fee. An over-limit cart returns `payable: false`, `CART_TOTAL_LIMIT_EXCEEDED`,
+`limitMinor: 200000` and `currency: "EUR"` without writing a quote.
+Selected-locality-only delivery is unavailable because this flow does not
+verify locality identifiers. Quotes do not reserve stock.
+
+- `POST /api/orders`: commit a reserved order using `quoteId`,
+  `quoteVersion`, `acceptedTermsVersion`, `accepted: true`, and an
+  `Idempotency-Key` header.
+- `POST /api/orders/:orderRef/payment-attempts`: create the one permitted
+  bank attempt using an `Idempotency-Key` header. The first successful
+  response contains the signed POST form for the hosted bank page. Replays
+  and existing attempts return the current payment result, not a new form.
+- `GET /api/orders/:orderRef/payment-result` and `GET /api/orders/:orderRef`:
+  read the owner's payment result and customer-safe order snapshot.
+- `POST /api/customer-order/access-requests`: submit `orderNumber`, `email`,
+  `locale` and a UUID `requestId`; the response is neutral for matches and
+  non-matches.
+- `POST /api/customer-order/access-session`: exchange the emailed
+  `grantToken` for an HttpOnly, one-order cookie; `GET /api/customer-order`
+  reads the corresponding customer-safe order snapshot.
+
+All customer endpoints require the guest session cookie, approved Origin and
+`X-CSRF-Token`. A frontend should remove the emailed grant from the URL fragment
+before making the exchange. Cross-site third-party cookie blocking still requires
+same-site deployment or a securely designed same-origin bridge.
 
 ### Dev deployment to AWS Lightsail
 
@@ -1605,6 +1735,14 @@ Shutdown waits for the current iteration.
 Currently, `inquiry_received` (`inquiry-v1`), `customer_payment_received`
 (`payment-v1`) and `customer_order_confirmed` (`acceptance-v1`) render escaped
 BG/EN HTML and plain text from stored inquiry/order/payment/acceptance snapshots.
+Staff enquiry mail uses one localized responsive template and matching plain
+text, with a Sofia-local received time, validated customer `Reply-To`, localized
+`MAIL_FROM` display name, approved snapshotted context media/codes, and trusted
+frontend links. It does not send customer emails. SMTP still routes through
+`MAIL_TO`; configure that value as the intended test or staff recipient, while
+local capture records the enquiry's configured recipient snapshot. Enquiry
+subject selection uses the stored canonical topic and selected product context;
+the original source page remains separate.
 Customer notifications only use the original order email and locale. Payment
 copy does not promise acceptance; acceptance lists the exact accepted and
 not-accepted subsets and subtotal, with financial clarification for partial

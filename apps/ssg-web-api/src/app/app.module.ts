@@ -21,6 +21,7 @@ import { SearchModule } from './modules/search/search.module';
 import { InventoryModule } from './modules/inventory/inventory.module';
 import { PublicContentModule } from './modules/public-content/public-content.module';
 import { PaymentsModule } from './modules/payments/payments.module';
+import { CheckoutModule } from './modules/checkout/checkout.module';
 
 @Module({
   imports: [
@@ -44,6 +45,7 @@ import { PaymentsModule } from './modules/payments/payments.module';
     InventoryModule.register(),
     PublicContentModule,
     PaymentsModule,
+    CheckoutModule,
     HealthModule,
     DictionaryModule,
   ],

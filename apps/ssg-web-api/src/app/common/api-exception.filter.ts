@@ -14,6 +14,8 @@ interface ApiErrorResponse {
   message_key: string;
   correlation_id: string;
   details?: Record<string, string>;
+  limitMinor?: number;
+  currency?: string;
 }
 
 @Catch()
@@ -67,6 +69,14 @@ export class ApiExceptionFilter implements ExceptionFilter {
           : this.messageKey(status),
       correlation_id: correlationId,
     };
+    if (
+      body.code === 'CART_TOTAL_LIMIT_EXCEEDED' &&
+      customBody?.get('limitMinor') === 200000 &&
+      customBody.get('currency') === 'EUR'
+    ) {
+      body.limitMinor = 200000;
+      body.currency = 'EUR';
+    }
     const details = customBody?.get('details');
     if (status === HttpStatus.BAD_REQUEST && body.code === 'VALIDATION_ERROR' &&
         details && typeof details === 'object' && !Array.isArray(details)) {

@@ -1,5 +1,7 @@
 import { isAbsolute } from 'node:path';
+import { createPrivateKey, createPublicKey } from 'node:crypto';
 import { isEmail } from 'class-validator';
+import { boricaGatewayPublicKey } from '../modules/payments/borica-signature';
 
 const defaultCorsOrigins = 'http://localhost:3000';
 
@@ -67,6 +69,99 @@ export function validateEnvironment(
     throw new Error('SESSION_COOKIE_SAME_SITE must be lax or none');
   }
 
+  const checkoutEnabled = environment.CHECKOUT_ENABLED ?? 'false';
+  if (checkoutEnabled !== 'true' && checkoutEnabled !== 'false') {
+    throw new Error('CHECKOUT_ENABLED must be true or false');
+  }
+  const decodeKey = (name: string): Buffer => {
+    const value = environment[name];
+    if (
+      typeof value !== 'string' ||
+      !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(value) ||
+      value.length === 0
+    ) {
+      throw new Error(`${name} must be a non-empty base64-encoded key or certificate`);
+    }
+    return Buffer.from(value, 'base64');
+  };
+  if (environment.BORICA_GATEWAY_PUBLIC_KEY_BASE64 || checkoutEnabled === 'true') {
+    try {
+      boricaGatewayPublicKey(String(environment.BORICA_GATEWAY_PUBLIC_KEY_BASE64 ?? ''));
+    } catch {
+      throw new Error('BORICA_GATEWAY_PUBLIC_KEY_BASE64 must encode a valid 2048-bit RSA PEM public key');
+    }
+  }
+  const checkoutNumbers: Record<string, number> = {};
+  if (checkoutEnabled === 'true' || environment.BORICA_GATEWAY_PUBLIC_KEY_BASE64) {
+    for (const [name, min, max] of [
+      ['CHECKOUT_QUOTE_TTL_SECONDS', 1, 86400],
+      ['ORDER_ACCESS_GRANT_TTL_SECONDS', 1, 2592000],
+      ['ORDER_ACCESS_SESSION_TTL_SECONDS', 1, 2592000],
+      ['ORDER_ACCESS_LOOKUP_TTL_SECONDS', 1, 86400],
+      ['PAYMENT_RECONCILE_INTERVAL_SECONDS', 5, 3600],
+      ['BORICA_REQUEST_TIMEOUT_MS', 1000, 60000],
+    ] as const) {
+      const value = Number(environment[name]);
+      if (!Number.isSafeInteger(value) || value < min || value > max) {
+        throw new Error(`${name} must be an integer between ${min} and ${max}`);
+      }
+      checkoutNumbers[name] = value;
+    }
+    const expectedGateway = nodeEnv === 'production'
+      ? 'https://3dsgate.borica.bg/cgi-bin/cgi_link'
+      : 'https://3dsgate-dev.borica.bg/cgi-bin/cgi_link';
+    if (environment.BORICA_GATEWAY_URL !== expectedGateway) {
+      throw new Error('BORICA_GATEWAY_URL must match the documented gateway for NODE_ENV');
+    }
+    const terminal = environment.BORICA_TERMINAL_ID;
+    const merchant = environment.BORICA_MERCHANT_ID;
+    const name = environment.BORICA_MERCHANT_NAME;
+    if (
+      typeof terminal !== 'string' || !/^[A-Za-z0-9]{8}$/.test(terminal) ||
+      typeof merchant !== 'string' || !/^[A-Za-z0-9]{10}$/.test(merchant) ||
+      typeof name !== 'string' || name.trim().length === 0 ||
+      name.length > 80 || /\p{C}/u.test(name)
+    ) {
+      throw new Error('BORICA terminal, merchant ID and merchant name are required');
+    }
+    try {
+      const privateKey = createPrivateKey(decodeKey('BORICA_PRIVATE_KEY_BASE64'));
+      if (privateKey.asymmetricKeyType !== 'rsa' ||
+          privateKey.asymmetricKeyDetails?.modulusLength !== 2048) {
+        throw new Error('Invalid bank signing key');
+      }
+      const bankKey = boricaGatewayPublicKey(String(environment.BORICA_GATEWAY_PUBLIC_KEY_BASE64));
+      if (bankKey.export({ type: 'spki', format: 'der' }).equals(
+        createPublicKey(privateKey).export({ type: 'spki', format: 'der' }),
+      )) {
+        throw new Error('Merchant signing key cannot be the gateway verification key');
+      }
+    } catch {
+      throw new Error('BORICA signing and gateway verification keys must be valid and distinct');
+    }
+    try {
+      const origin = new URL(String(environment.PUBLIC_SITE_ORIGIN));
+      const returnUrl = new URL(String(environment.BORICA_BROWSER_RETURN_URL));
+      const accessUrl = new URL(String(environment.ORDER_ACCESS_URL));
+      if (
+        !['http:', 'https:'].includes(origin.protocol) ||
+        (origin.protocol === 'http:' &&
+          !['localhost', '127.0.0.1', '[::1]'].includes(origin.hostname)) ||
+        origin.pathname !== '/' || origin.search || origin.hash ||
+        origin.username || origin.password ||
+        (returnUrl && (returnUrl.origin !== origin.origin || returnUrl.username ||
+          returnUrl.password || returnUrl.search || returnUrl.hash)) ||
+        accessUrl.origin !== origin.origin || accessUrl.username || accessUrl.password ||
+        accessUrl.search || accessUrl.hash
+      ) throw new Error('Invalid checkout return URL');
+    } catch {
+      throw new Error('Checkout return and order-access URLs must be on the configured public site origin');
+    }
+    if (decodeKey('ORDER_ACCESS_ENCRYPTION_KEY_BASE64').length !== 32) {
+      throw new Error('ORDER_ACCESS_ENCRYPTION_KEY_BASE64 must encode 32 bytes');
+    }
+  }
+
   const devStaffAuthEnabled = environment.DEV_STAFF_AUTH_ENABLED ?? 'false';
   const devCataloguePublish =
     environment.DEV_CATALOGUE_PUBLISH_ENABLED ?? 'false';
@@ -124,8 +219,8 @@ export function validateEnvironment(
     from: environment.MAIL_FROM ?? '',
     sandboxRecipient: environment.MAIL_TO ?? '',
   };
-  const smtpConfigured = Object.values(mailSettings).some(
-    (value) => value !== '' && value !== undefined,
+  const smtpConfigured = Object.entries(mailSettings).some(
+    ([name, value]) => name !== 'sandboxRecipient' && value !== '' && value !== undefined,
   );
   const localTestMailEnabled =
     environment.LOCAL_TEST_MAIL_ENABLED ?? 'false';
@@ -158,7 +253,7 @@ export function validateEnvironment(
       typeof mailSettings.from !== 'string' ||
       !isEmail(mailSettings.from) ||
       typeof mailSettings.sandboxRecipient !== 'string' ||
-      !isEmail(mailSettings.sandboxRecipient)
+      (nodeEnv !== 'production' && !isEmail(mailSettings.sandboxRecipient))
     ) {
       throw new Error(
         'SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASSWORD, MAIL_FROM and MAIL_TO must all be configured with valid values',
@@ -168,23 +263,21 @@ export function validateEnvironment(
     if (!Number.isInteger(smtpPort) || smtpPort < 1 || smtpPort > 65535) {
       throw new Error('SMTP_PORT must be an integer between 1 and 65535');
     }
-    if (nodeEnv === 'production') {
-      throw new Error(
-        'SMTP transport is not enabled for production; configure it in the production mail deployment task',
-      );
-    }
   }
   if (outboxWorkerEnabled === 'true') {
-    if (nodeEnv === 'production') {
-      throw new Error(
-        'Outbox worker requires a reviewed production adapter; local capture is development-only',
-      );
-    }
     if (!smtpConfigured && !captureDirectory) {
       throw new Error(
         'Configure SMTP sandbox delivery or OUTBOX_CAPTURE_DIRECTORY when the worker is enabled',
       );
     }
+    if (nodeEnv !== 'production' && (typeof mailSettings.sandboxRecipient !== 'string' ||
+        !isEmail(mailSettings.sandboxRecipient))) {
+      throw new Error('MAIL_TO must be a controlled test recipient outside production');
+    }
+  }
+  if (nodeEnv === 'production' && (captureDirectory ||
+      (checkoutEnabled === 'true' && (!smtpConfigured || outboxWorkerEnabled !== 'true')))) {
+    throw new Error('Production checkout requires SMTP and the outbox worker; local mail capture is prohibited');
   }
   const workerNumbers: Record<string, number> = {};
   for (const [name, defaultValue, minimum, maximum] of [
@@ -216,6 +309,8 @@ export function validateEnvironment(
     DATABASE_URL: databaseUrl,
     CORS_ORIGINS: corsOrigins.join(','),
     SESSION_COOKIE_SAME_SITE: sessionCookieSameSite,
+    CHECKOUT_ENABLED: checkoutEnabled === 'true',
+    ...checkoutNumbers,
     DEV_STAFF_AUTH_ENABLED: devStaffAuthEnabled === 'true',
     DEV_CATALOGUE_PUBLISH_ENABLED: devCataloguePublish === 'true',
     OUTBOX_WORKER_ENABLED: outboxWorkerEnabled === 'true',
@@ -227,7 +322,7 @@ export function validateEnvironment(
     SMTP_USER: smtpConfigured ? String(mailSettings.user).trim() : '',
     SMTP_PASSWORD: smtpConfigured ? mailSettings.password : '',
     MAIL_FROM: smtpConfigured ? String(mailSettings.from).trim() : '',
-    MAIL_TO: smtpConfigured ? String(mailSettings.sandboxRecipient).trim() : '',
+    MAIL_TO: String(mailSettings.sandboxRecipient).trim(),
     ...workerNumbers,
   };
 }
