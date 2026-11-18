@@ -4,6 +4,7 @@ import { isEmail } from "class-validator";
 import { createHash } from "node:crypto";
 import nodemailer from "nodemailer";
 import type { Transporter } from "nodemailer";
+import type SMTPTransport from "nodemailer/lib/smtp-transport";
 import { LocalMailCaptureService } from "./local-mail-capture.service";
 import type { CapturedMail } from "./local-mail-capture.service";
 
@@ -21,7 +22,7 @@ export class MailDeliveryError extends Error {
 @Injectable()
 export class MailDeliveryService {
   private readonly logger = new Logger(MailDeliveryService.name);
-  private readonly transporter?: Transporter;
+  private readonly transporter?: Transporter<SMTPTransport.SentMessageInfo>;
   private readonly smtpEnabled: boolean;
 
   constructor(
@@ -58,7 +59,12 @@ export class MailDeliveryService {
   async deliver(key: string, mail: CapturedMail): Promise<string> {
     this.validate(key, mail);
     const production = this.config.get<string>("NODE_ENV") === "production";
-    const recipient = production ? mail.recipient : this.config.get<string>("MAIL_TO");
+    const development = this.config.get<string>("NODE_ENV") === "development";
+    const testRecipient = production ? undefined : this.config.get<string>("MAIL_TO");
+    if (!production && (!testRecipient || !isEmail(testRecipient) || /[\r\n]/.test(testRecipient))) {
+      throw new MailDeliveryError("SMTP_CONFIGURATION_UNAVAILABLE");
+    }
+    const recipient = production || (development && this.smtpEnabled) ? mail.recipient : testRecipient;
     if (!recipient || !isEmail(recipient)) {
       throw new MailDeliveryError("SMTP_CONFIGURATION_UNAVAILABLE");
     }
@@ -74,7 +80,7 @@ export class MailDeliveryService {
 
     const transporter = this.transporter;
     const from = this.config.get<string>("MAIL_FROM");
-    if (!transporter || !from || !recipient || (!production && !this.config.get<string>("MAIL_TO"))) {
+    if (!transporter || !from) {
       throw new MailDeliveryError("SMTP_CONFIGURATION_UNAVAILABLE");
     }
     const messageId = `<${createHash("sha256").update(key).digest("hex")}@ssg-web-api.invalid>`;
@@ -82,12 +88,17 @@ export class MailDeliveryService {
       const result = await transporter.sendMail({
         from: mail.fromName ? { name: mail.fromName, address: from } : from,
         to: recipient,
+        ...(development && testRecipient && testRecipient.toLowerCase() !== recipient.toLowerCase()
+          ? { bcc: testRecipient } : {}),
         ...(mail.replyTo ? { replyTo: mail.replyTo } : {}),
         subject: outgoing.subject,
         text: mail.text,
         html: mail.html,
         messageId,
       });
+      if (result.rejected.length > 0) {
+        throw new MailDeliveryError("SMTP_DELIVERY_FAILED");
+      }
       return result.messageId;
     } catch {
       this.logger.warn("SMTP delivery failed");
