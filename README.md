@@ -77,12 +77,16 @@ incorrect policy paths remain unavailable. New policy publication still requires
 the current configured origin.
 
 Enable `OUTBOX_WORKER_ENABLED` and configure SMTP. Non-production mail subjects
-have `[DEV]` prefixes and all recipients are redirected to `MAIL_TO`, including
-access links. Private local capture also requires `MAIL_TO`. Production sends
-to the stored actual recipient without the prefix and requires SMTP plus the
-outbox worker when checkout is enabled; local mail capture is prohibited.
-SMTP is at-least-once: a deterministic Message-ID does not guarantee
-provider-side deduplication.
+have `[DEV]` prefixes and require `MAIL_TO`. With `NODE_ENV=development`, SMTP
+sends to the stored intended recipient and BCCs `MAIL_TO`; matching addresses
+are deduplicated case-insensitively. Both copies contain the same single-use
+order-access link, so use controlled customer test inboxes and redeem it only
+once. Local/test SMTP and all private capture remain restricted to `MAIL_TO`.
+Production sends only to the stored actual recipient without the prefix and
+requires SMTP plus the outbox worker when checkout is enabled; local mail
+capture is prohibited. SMTP is at-least-once: a deterministic Message-ID does
+not guarantee provider-side deduplication. Rejection of any recipient fails
+the delivery for outbox retry; recipients already accepted may receive duplicates.
 
 #### Stock and payment policy
 
@@ -1767,9 +1771,10 @@ BG/EN HTML and plain text from stored inquiry/order/payment/acceptance snapshots
 Staff enquiry mail uses one localized responsive template and matching plain
 text, with a Sofia-local received time, validated customer `Reply-To`, localized
 `MAIL_FROM` display name, approved snapshotted context media/codes, and trusted
-frontend links. It does not send customer emails. SMTP still routes through
-`MAIL_TO`; configure that value as the intended test or staff recipient, while
-local capture records the enquiry's configured recipient snapshot. Enquiry
+frontend links. It does not send customer emails. Development SMTP sends to the
+enquiry's configured staff recipient and BCCs `MAIL_TO`; local/test SMTP and
+private capture remain restricted to `MAIL_TO`. Production sends only to the
+configured staff recipient. Enquiry
 subject selection uses the stored canonical topic and selected product context;
 the original source page remains separate.
 Customer notifications only use the original order email and locale. Payment
