@@ -15,6 +15,7 @@ import {
 import { TransactionService } from '../../common/transactions/transaction.service';
 import { PrismaService } from '../../database/prisma.service';
 import type { OrderAccessRequestDto } from './order-access.dto';
+import { paymentHold } from './payment-hold';
 
 const ACCESS_COOKIE = 'ssg_order_access';
 const ORDER_VIEW_INCLUDE = {
@@ -203,6 +204,7 @@ export class OrderAccessService {
       orderNumber: order.number,
       createdAt: order.createdAt.toISOString(),
       locale: order.locale,
+      hold: paymentHold(order.paymentHoldExpiresAt, order.paymentHoldExpiredAt, order.bankPaymentAttempt),
       items,
       money: {
         currency: order.currency,
@@ -223,6 +225,10 @@ export class OrderAccessService {
         ...(typeof receiving.locality === 'string' ? { locality: receiving.locality } : {}),
         ...(typeof receiving.address === 'string' ? { address: receiving.address } : {}),
         ...(typeof receiving.office === 'string' ? { office: receiving.office } : {}),
+        ...(typeof receiving.officeAddress === 'string' ? { officeAddress: receiving.officeAddress } : {}),
+        ...(typeof receiving.cityId === 'string' ? { cityId: receiving.cityId } : {}),
+        ...(typeof receiving.officeId === 'string' ? { officeId: receiving.officeId } : {}),
+        ...(typeof receiving.officeCode === 'string' ? { officeCode: receiving.officeCode } : {}),
       },
       nextAction: 'view_order',
     };

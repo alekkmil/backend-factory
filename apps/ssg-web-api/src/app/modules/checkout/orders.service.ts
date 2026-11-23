@@ -7,7 +7,8 @@ import {
 import { ConfigService } from '@nestjs/config';
 import { randomBytes, randomUUID } from 'node:crypto';
 import { Prisma } from '../../../generated/prisma/client';
-import { TransactionService } from '../../common/transactions/transaction.service';
+import { hashIdempotencyPayload, TransactionService } from '../../common/transactions/transaction.service';
+import { PrismaService } from '../../database/prisma.service';
 import {
   CHECKOUT_QUOTE_INCLUDE,
   CheckoutValidationService,
@@ -15,6 +16,8 @@ import {
 } from './checkout-validation.service';
 import type { CommitOrderDto } from './orders.dto';
 import { StockPublicationService } from '../../common/stock-facts/stock-publication.service';
+import { PAYMENT_HOLD_DURATION_MS } from './payment-hold';
+import { EcontDirectoryService, invalidEcontOffice } from './econt-directory.service';
 
 function snapshot(value: Prisma.JsonValue): Prisma.InputJsonObject {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) {
@@ -30,6 +33,8 @@ export class OrdersService {
     private readonly transactions: TransactionService,
     private readonly validation: CheckoutValidationService,
     private readonly publication: StockPublicationService,
+    private readonly prisma: PrismaService,
+    private readonly econt: EcontDirectoryService,
   ) { }
 
   async commit(
@@ -47,20 +52,58 @@ export class OrdersService {
         code: 'FIELD_INVALID', message_key: 'errors.validation',
       });
     }
+    const action = {
+      scopeKey: `checkout:order:${guestId}`,
+      requestId: key,
+      payload: {
+        quoteId: input.quoteId.toLowerCase(),
+        quoteVersion: input.quoteVersion,
+        acceptedTermsVersion: input.acceptedTermsVersion,
+        accepted: input.accepted,
+      },
+    };
+    const existingActionTakesPrecedence = async (): Promise<boolean> => {
+      const existing = await this.prisma.actionRequest.findUnique({
+        where: { scopeKey_requestId: { scopeKey: action.scopeKey, requestId: action.requestId } },
+        select: { state: true, payloadHash: true },
+      });
+      return !!existing && (
+        existing.payloadHash !== hashIdempotencyPayload(action.payload) ||
+        existing.state === 'committed' || existing.state === 'rejected'
+      );
+    };
+    let checkedFulfilmentHash: string | undefined;
     try {
+      if (!await existingActionTakesPrecedence()) {
+        try {
+          const quote = await this.prisma.quote.findFirst({
+            where: { id: input.quoteId, guestId },
+            select: { fulfilment: true, locale: true, consumedAt: true, expiresAt: true },
+          });
+          if (quote && !quote.consumedAt && quote.expiresAt && quote.expiresAt.getTime() > Date.now()) {
+            const selection = this.econt.selectionFromSnapshot(quote.fulfilment);
+            if (selection) {
+              const office = await this.econt.selectedOffice(selection.cityId, selection.officeCode, quote.locale);
+              const receiving = snapshot(quote.fulfilment);
+              if (receiving.officeId !== office.id ||
+                  receiving.locality !== office.locality || receiving.office !== office.name ||
+                  receiving.officeAddress !== office.address) {
+                throw invalidEcontOffice();
+              }
+              checkedFulfilmentHash = hashIdempotencyPayload(quote.fulfilment);
+            }
+          }
+        } catch (error) {
+          if (!(error instanceof BadRequestException) && !(error instanceof ServiceUnavailableException)) {
+            throw error;
+          }
+          if (!await existingActionTakesPrecedence()) throw error;
+        }
+      }
       return await this.transactions.serializable(async (transaction) =>
         this.transactions.executeIdempotentAction(
           transaction,
-          {
-            scopeKey: `checkout:order:${guestId}`,
-            requestId: key,
-            payload: {
-              quoteId: input.quoteId.toLowerCase(),
-              quoteVersion: input.quoteVersion,
-              acceptedTermsVersion: input.acceptedTermsVersion,
-              accepted: input.accepted,
-            },
-          },
+          action,
           async () => {
             const rows = await transaction.$queryRaw<{ id: string }[]>`
                 SELECT id FROM "Quote"
@@ -75,6 +118,10 @@ export class OrdersService {
             if (quote.consumedAt !== null) throw checkoutConflict('QUOTE_CHANGED');
             if (!quote.expiresAt || quote.expiresAt.getTime() <= Date.now()) {
               throw checkoutConflict('QUOTE_EXPIRED');
+            }
+            if (this.econt.selectionFromSnapshot(quote.fulfilment) &&
+                checkedFulfilmentHash !== hashIdempotencyPayload(quote.fulfilment)) {
+              throw invalidEcontOffice();
             }
             await transaction.$queryRaw`
                 SELECT id FROM "PolicyVersion" WHERE id = ${quote.policyVersionId}::uuid FOR UPDATE
@@ -137,6 +184,8 @@ export class OrdersService {
                 currency: quote.currency,
                 termsAcceptedAt: now,
                 termsActorReference: `guest:${guestId}`,
+                createdAt: now,
+                paymentHoldExpiresAt: new Date(now.getTime() + PAYMENT_HOLD_DURATION_MS),
                 from_OrderLine_orderId: {
                   create: quote.from_QuoteLine_quoteId.map((line) => {
                     const stock = stocks.find((unit) => unit.id === line.stockItemId);
@@ -154,7 +203,7 @@ export class OrdersService {
                   }),
                 },
               },
-              select: { id: true, number: true, createdAt: true },
+              select: { id: true, number: true, createdAt: true, paymentHoldExpiresAt: true },
             });
             await transaction.quote.update({
               where: { id: quote.id },
@@ -167,7 +216,7 @@ export class OrdersService {
               data: {
                 guestId, action: 'checkout.committed', subjectType: 'Order',
                 subjectId: order.id, eventKey: `checkout-order:${order.id}`,
-                after: { reservationPolicy: 'manual_release_only' }
+                after: { reservationPolicy: 'unpaid_hold_10_minutes' }
               },
             });
             return {
@@ -176,6 +225,7 @@ export class OrdersService {
                 orderRef: order.id,
                 orderNumber: order.number,
                 createdAt: order.createdAt.toISOString(),
+                hold: { expiresAt: order.paymentHoldExpiresAt?.toISOString() ?? null, state: 'active' },
                 nextAction: 'initiate_payment',
               },
             };

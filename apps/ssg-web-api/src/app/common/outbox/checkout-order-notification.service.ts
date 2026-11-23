@@ -189,7 +189,8 @@ export class CheckoutOrderNotificationService {
         const delivery = receiving.method === 'econt_address' || receiving.method === 'econt_office';
         const receive = delivery
           ? [receiving.recipientName, receiving.phone, receiving.locality,
-              receiving.address ?? receiving.office].filter((value) => typeof value === 'string').join(', ')
+              receiving.address ?? receiving.office, receiving.officeAddress]
+              .filter((value) => typeof value === 'string').join(', ')
           : typeof receiving.method === 'string' && receiving.method === 'store_pickup'
             ? localized.address
             : '';
@@ -218,7 +219,8 @@ export class CheckoutOrderNotificationService {
           : '\n\nThis link provides access to your order. Please do not forward it.\nIf it is no longer valid, request a new link from “Order lookup” on our website.\nIf you did not make this request, you can ignore this email.\n\nSSG · Sea of Silver & Gold';
       }
       const text = `${before}${link}${after}`;
-      const html = `<div style="font-family:Arial,sans-serif;white-space:pre-wrap">${escapeHtml(before)}<a href="${escapeHtml(link)}">${escapeHtml(link)}</a>${escapeHtml(after)}</div>`;
+      const linkLabel = bg ? 'Виж поръчката' : 'View order';
+      const html = `<div style="font-family:Arial,sans-serif;white-space:pre-wrap">${escapeHtml(before)}<a href="${escapeHtml(link)}" style="text-decoration:underline">${linkLabel}</a>${escapeHtml(after)}</div>`;
       return {
         outcome: 'sent',
         providerMessageId: await this.mail.deliver(message.id, {

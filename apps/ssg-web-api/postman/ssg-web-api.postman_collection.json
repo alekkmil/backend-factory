@@ -109,7 +109,8 @@
     { "key": "checkoutPhone", "value": "+359888000000", "type": "string" },
     { "key": "checkoutLocality", "value": "Sofia", "type": "string" },
     { "key": "checkoutAddress", "value": "Test Street 1", "type": "string" },
-    { "key": "checkoutOffice", "value": "", "type": "string" },
+    { "key": "econtCityId", "value": "", "type": "string" },
+    { "key": "econtOfficeCode", "value": "", "type": "string" },
     { "key": "quoteId", "value": "", "type": "string" },
     { "key": "quoteVersion", "value": "", "type": "string" },
     { "key": "quoteExpiresAt", "value": "", "type": "string" },
@@ -188,7 +189,7 @@
     },
     {
       "name": "Checkout and payments",
-      "description": "Manual sequence: bootstrap Guest session, inspect eligible exact units, create ONE quote for the chosen receiving method, review returned terms/totals, commit, initiate payment once, then read result/order. Set checkoutUnitId from product.stock_choices[].stock_item_id, not productId; selection is deliberately manual. Set real test contact and receiving values. Only published, online-enabled, available EUR jewellery compatible with fulfilment is payable; quantity is exactly 1 per distinct unit and aggregate total is <=200000 cents with zero delivery. Quotes do not reserve; commitment reserves all units indefinitely, including abandonment/decline: manual staff recovery is required. Commit sends accepted:true and represents explicit acceptance of the returned terms: review them before clicking Send. Keys are generated only if empty and retained on retries. For an intentional NEW order, first resolve any prior order/payment, then clear orderCommitKey, paymentKey, orderRef, orderNumber and attemptRef and create a fresh quote. Never rotate keys to recover an unknown timeout. One payment attempt per order; replay returns current result without another form. Hosted-bank navigation must be tested in a browser using the frontend's native form submission, not Postman AJAX or an unsigned callback. This folder does not simulate payment, collect card data, auto-submit bank forms or auto-redeem email links. DEV must have matching migrations/config and an externally reachable BORICA BACKREF using the order's database. NODE_ENV=development SMTP sends [DEV] emails to the intended recipient and BCCs MAIL_TO; local/test SMTP and private capture route only to MAIL_TO. Use controlled customer test inboxes. Use sandbox credentials/cards only on the test gateway. Never export responses/history containing signed bank fields. Browser FE uses credentials:include plus X-CSRF-Token, including GETs; Postman uses its cookie jar plus explicit approved Origin. Browser cross-site cookies require SameSite=None and may still be blocked.",
+      "description": "Manual sequence: bootstrap Guest session, inspect eligible exact units, create ONE quote, review terms/totals, commit and initiate payment. Quotes do not reserve; a new committed order holds exact units for 10 minutes from createdAt if no bank attempt starts. Expired no-attempt holds are released by the worker; started, failed or unresolved bank attempts retain stock for reconciliation/manual review. Existing orders have no automatic backfill. Commit means explicit terms acceptance. Keep idempotency keys and payloads unchanged on retries; do not create a replacement while a bank attempt is unresolved. A proven expired order without an attempt requires a new quote, terms acceptance and new keys. Hosted-bank navigation must use the backend signed form in a browser. DEV must have the hold migration, worker and externally reachable BORICA BACKREF configured. Development SMTP sends [DEV] mail to the intended recipient and BCCs MAIL_TO. Never export signed forms or access tokens. Browser requests use credentials:include and X-CSRF-Token.",
       "item": [
         {
           "name": "Inspect eligible exact units for Sofia pickup",
@@ -279,6 +280,26 @@
           "response": []
         },
         {
+          "name": "Econt localities",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/checkout/localities?locale={{locale}}",
+            "description": "Choose a locality from localities and copy its string id to econtCityId. Optional q filters name, postcode or region. If changing city, clear the selected office. 503 means provider unavailable, not an empty directory."
+          },
+          "response": []
+        },
+        {
+          "name": "Econt offices for locality",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/checkout/offices?locale={{locale}}&localityId={{econtCityId}}",
+            "description": "Choose an entry, show its localized name/address, and copy code to econtOfficeCode. Presence in the current city-specific provider list is the agreed selectable rule, not independently verified active status."
+          },
+          "response": []
+        },
+        {
           "name": "Create quote - Econt office",
           "event": [
             {
@@ -309,11 +330,11 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"items\": [{ \"unitId\": \"{{checkoutUnitId}}\", \"quantity\": 1 }],\n  \"contact\": { \"firstName\": \"Ivan\", \"lastName\": \"Petrov\", \"email\": \"{{checkoutEmail}}\", \"phone\": \"{{checkoutPhone}}\" },\n  \"cardholder\": { \"name\": \"Ivan Petrov\", \"email\": \"{{checkoutEmail}}\", \"billingAddress\": \"Test Street 1\" },\n  \"receiving\": { \"method\": \"econt_office\", \"country\": \"BG\", \"recipientName\": \"Ivan Petrov\", \"phone\": \"{{checkoutPhone}}\", \"locality\": \"{{checkoutLocality}}\", \"office\": \"{{checkoutOffice}}\" },\n  \"locale\": \"{{locale}}\"\n}",
+              "raw": "{\n  \"items\": [{ \"unitId\": \"{{checkoutUnitId}}\", \"quantity\": 1 }],\n  \"contact\": { \"firstName\": \"Ivan\", \"lastName\": \"Petrov\", \"email\": \"{{checkoutEmail}}\", \"phone\": \"{{checkoutPhone}}\" },\n  \"cardholder\": { \"name\": \"Ivan Petrov\", \"email\": \"{{checkoutEmail}}\", \"billingAddress\": \"Test Street 1\" },\n  \"receiving\": { \"method\": \"econt_office\", \"country\": \"BG\", \"recipientName\": \"Ivan Petrov\", \"phone\": \"{{checkoutPhone}}\", \"cityId\": \"{{econtCityId}}\", \"officeCode\": \"{{econtOfficeCode}}\" },\n  \"locale\": \"{{locale}}\"\n}",
               "options": { "raw": { "language": "json" } }
             },
             "url": "{{baseUrl}}/api/checkout/quotes",
-            "description": "Alternative quote example. Set checkoutOffice to the actual selected office; no address field. BG only; customer delivery fee zero. Same quote capture/non-payable behavior as pickup. No Econt office search or transfer/split fulfilment is implied by this payload."
+            "description": "Choose locality and office using the lookup requests first. Send cityId and officeCode only, not free-form locality/office/address. Unknown, moved or unavailable office returns 400 VALIDATION_ERROR with details.receiving.officeCode=office_unavailable; provider errors return 503. Office is revalidated against the immutable quote at commitment. Customer delivery fee zero; no transfer/split fulfilment."
           },
           "response": []
         },
@@ -359,7 +380,7 @@
               "options": { "raw": { "language": "json" } }
             },
             "url": "{{baseUrl}}/api/orders",
-            "description": "Manual Send means explicit terms acceptance. Atomically revalidates and reserves all exact units or rolls back. 201 new / 200 matching replay returns orderRef, orderNumber, createdAt, nextAction:initiate_payment. Captures order identifiers. Retry timeouts with this SAME key and identical payload; changed payload returns 409 IDEMPOTENCY_CONFLICT. Never regenerate the key automatically. QUOTE_CHANGED, QUOTE_EXPIRED, TERMS_CHANGED, ITEM_UNAVAILABLE and CART_TOTAL_LIMIT_EXCEEDED block commitment. A new reviewed quote needs a new key only for an intentional new operation after resolving any previous unknown commitment."
+            "description": "Manual Send means explicit terms acceptance. Atomically revalidates and holds all exact units or rolls back. 201 new / 200 matching replay returns orderRef, orderNumber, createdAt, hold:{expiresAt,state:active}, nextAction:initiate_payment. Deadline is createdAt+10 minutes. A replay returns the original creation snapshot, not live hold state; read payment-result or the owner order. Retry timeouts with the same key and payload. The worker releases a hold with no attempt after its deadline; started attempts retain stock. A new reviewed quote requires a new key only after resolving any previous unknown commitment/payment."
           },
           "response": []
         },
@@ -398,7 +419,7 @@
               { "key": "Idempotency-Key", "value": "{{paymentKey}}" }
             ],
             "url": "{{baseUrl}}/api/orders/{{orderRef}}/payment-attempts",
-            "description": "No body. First 201 returns attemptRef, outcome:pending, nextAction:submit_bank_form and form {method:POST,url,fields}. Capture saves ONLY attemptRef, never signed form fields. Submit every returned field unchanged as a native browser form ONCE, normally through the frontend flow. Do not AJAX-fetch the bank page or log/save/export the form. Sandbox URL is https://3dsgate-dev.borica.bg/cgi-bin/cgi_link outside production; no keys or card data belong in Postman. Existing/replayed attempts return 200 current result WITHOUT a form, even with a different key. A lost initial form response can require manual recovery; do not create another order/attempt. Backend verifies callbacks and runs inquiries; FE must not fake callbacks."
+            "description": "No body. First 201 returns attemptRef, outcome:pending, hold:{expiresAt,state:payment_pending}, nextAction:submit_bank_form and form {method:POST,url,fields}. Submit the signed form unchanged once; do not log/export it. 409 PAYMENT_HOLD_EXPIRED means no attempt may start for an expired hold. Existing/replayed attempts return the current result WITHOUT a form, even with a different key. A lost initial form requires recovery; do not create another order/attempt while outcome is unknown. Backend verifies callbacks and runs inquiries; do not fake callbacks."
           },
           "response": []
         },
@@ -411,7 +432,7 @@
               { "key": "X-CSRF-Token", "value": "{{guestCsrfToken}}" }
             ],
             "url": "{{baseUrl}}/api/orders/{{orderRef}}/payment-result",
-            "description": "200 returns attemptRef (nullable), outcome:pending|paid|failed, bankVerified, totalMinor, currency:EUR, nextAction, and verifiedPaidMinor only when paid. nextAction check_result: pending; view_order: paid; contact_support: stop polling/no automated retry; back_to_review: no attempt. Browser redirects are not proof of payment. FE can poll conservatively (e.g. 10 seconds with backoff), respecting 429 Retry-After. Optional customerMessage/customerMessageVerified:false is unsigned bank text: render as untrusted text only, not HTML/links/actions or financial evidence. Bank failures/unknowns do not automatically release stock; paid is not automatic acceptance/dispatch."
+            "description": "200 returns attemptRef (nullable), outcome:pending|paid|failed, bankVerified, totalMinor, currency:EUR, hold:{expiresAt,state}, nextAction and verifiedPaidMinor only when paid. hold.state: active, expired, payment_pending, payment_verified, payment_failed, legacy. Active without an attempt gives back_to_review; expired without an attempt gives create_new_order; pending attempt gives check_result; verified paid gives view_order; failure/manual review gives contact_support. Deadline passing never releases an existing bank attempt. Browser redirects are not proof of payment. Optional customerMessage is unsigned untrusted text. No saved response here represents a real bank transaction."
           },
           "response": []
         },
@@ -424,7 +445,7 @@
               { "key": "X-CSRF-Token", "value": "{{guestCsrfToken}}" }
             ],
             "url": "{{baseUrl}}/api/orders/{{orderRef}}",
-            "description": "Requires the SAME guest owner as order commitment. Returns orderNumber, createdAt, locale, items, money, payment, receiving and nextAction without internal stock/reservation identifiers or lifecycle status. A public orderNumber is a reference, never access authorization. After guest expiry use the emailed one-order access flow instead."
+            "description": "Requires the SAME guest owner as order commitment. Returns orderNumber, createdAt, locale, hold:{expiresAt,state}, items, money, payment, receiving and nextAction without internal stock/reservation identifiers. Older orders have hold.state:legacy and expiresAt:null. A public orderNumber is never access authorization. After guest expiry use emailed one-order access."
           },
           "response": []
         }

@@ -94,7 +94,7 @@ export class CheckoutReceivingDto {
   @Length(3, 40)
   phone?: string;
 
-  @ValidateIf((object: CheckoutReceivingDto) => object.method !== 'store_pickup')
+  @ValidateIf((object: CheckoutReceivingDto) => object.method === 'econt_address')
   @Transform(({ value }) => normalizeText(value))
   @IsString()
   @Length(1, 200)
@@ -109,11 +109,14 @@ export class CheckoutReceivingDto {
   address?: string;
 
   @ValidateIf((object: CheckoutReceivingDto) => object.method === 'econt_office')
-  @Transform(({ value }) => normalizeText(value))
   @IsString()
-  @Length(1, 300)
-  @Matches(PLAIN_TEXT)
-  office?: string;
+  @Matches(/^[1-9]\d{0,8}$/)
+  cityId?: string;
+
+  @ValidateIf((object: CheckoutReceivingDto) => object.method === 'econt_office')
+  @IsString()
+  @Matches(/^[A-Za-z0-9@._-]{1,80}$/)
+  officeCode?: string;
 }
 
 export class CreateCheckoutQuoteDto {

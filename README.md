@@ -34,7 +34,7 @@ and `/api/test-payment` routes have been removed. Legacy sandbox database rows
 are retained as history, excluded from customer reads and payments; old sandbox
 outbox jobs are suppressed rather than sent as real payment confirmations.
 
-Review and apply migrations through `20261117150000_add_verified_checkout` before
+Review and apply migrations through `20261123120000_add_unpaid_checkout_hold` before
 enabling `CHECKOUT_ENABLED=true`. No migration is automatically run at startup.
 The new bank tables are separate from historical sandbox attempts/events.
 Existing paid/stock facts are never rewritten to retrofit the new policy.
@@ -93,9 +93,19 @@ the delivery for outbox retry; recipients already accepted may receive duplicate
 Quotes do not reserve. Order commitment atomically revalidates all exact units,
 prices, fulfilment and terms and reserves every unit, or rolls back everything.
 Reservations use conditional stock updates and database constraints.
-Stock stays reserved indefinitely: there is **no automatic timeout or release**,
-including abandonment, browser closure, guest expiry and verified decline.
-Failed or unresolved orders require staff/manual recovery before release.
+New orders receive a persisted payment-hold deadline exactly 10 minutes after
+creation. A background worker checks every five seconds and atomically expires
+orders without a bank attempt, releasing only exact units still held by that
+order with no recorded sale. Conflicting stock is retained and flagged for
+staff review. Worker downtime or errors delay physical release; initiation is
+still rejected at the deadline. The worker must be running for automatic release.
+Orders created before the migration have no deadline and retain their previous
+manual-review policy; there is no automatic backfill.
+
+Once a bank attempt exists, the deadline does not release stock. The bank
+outcome must be reconciled, including after browser closure; failed or unresolved
+orders require staff/manual recovery before release. SSG must approve a separate
+policy before introducing an unresolved-attempt deadline or automatic retry.
 No sale, acceptance, dispatch or automatic refund follows from payment alone.
 
 Initiation revalidates the committed order's own exact reservations and the
@@ -107,10 +117,22 @@ retry/new attempts and a staff release UI are not implemented.
 
 If initiation fails before an attempt is committed (`attemptRef: null`), fix
 the server failure and repeat initiation with the original owner session,
-order reference and idempotency key. A rolled-back initiation does not consume
-the key or release the order's reservation. Do not create a replacement order.
+order reference and idempotency key only while the hold remains active.
+A rolled-back initiation does not consume the key. After expiry initiation
+returns `409 PAYMENT_HOLD_EXPIRED`; a new quote and order require renewed review
+and acceptance. For an existing bank attempt, never create a replacement order
+or attempt to recover an unknown outcome.
 The terminal advisory lock uses `$executeRaw` because PostgreSQL returns `void`
 for the lock function, which Prisma cannot deserialize through `$queryRaw`.
+
+The order-commit response includes `hold: {expiresAt, state: "active"}` as a
+creation snapshot; idempotent replays preserve that snapshot. Fetch the owner
+order or payment result for current state. Their `hold.state` is `active`,
+`expired`, `payment_pending`, `payment_verified`, `payment_failed`, or `legacy`;
+`hold.expiresAt` is the deadline or null for older orders. Payment result
+`nextAction: "create_new_order"` applies to expired orders without a bank attempt.
+Payment outcome `pending` with a null attempt does not mean payment started.
+`payment_verified` reflects the bank result, not order acceptance or dispatch.
 
 All callbacks must pass RSA-SHA256/PKCS#1 MAC_GENERAL verification and match
 the attempt, terminal, order, nonce, amount and EUR currency. Only
@@ -166,15 +188,44 @@ The request contains `items` (`unitId`, `quantity: 1`), `contact` (`firstName`,
 `lastName`, `email`, `phone`), `cardholder` (`name` in Latin script, `email`,
 `billingAddress`), `receiving` and `locale`. Receiving uses `country: "BG"`
 and `method: "econt_address"`, `"econt_office"` or `"store_pickup"`. Delivery
-also requires `recipientName`, `phone`, `locality` and either `address` or
-`office`. Pickup has no delivery fields. The endpoint snapshots validated
+also requires `recipientName` and `phone`. Address delivery requires `locality`
+and `address`; office delivery requires string `cityId` and `officeCode` from
+the Econt lookups below, not free-form `locality` or `office`. This changes the
+old free-form office quote contract; old office quotes must be recreated.
+Pickup has no delivery fields. The endpoint snapshots validated
 customer and cardholder details; do not send card numbers or security codes.
+
+For Econt office delivery:
+
+1. `GET /api/checkout/localities?locale=bg|en` returns
+   `{localities:[{id,name,postcode,region}]}`. Optional `q` filters the
+   localized name, postcode or region. IDs are strings. The frontend may load
+   once and filter locally.
+2. Select a locality, clear any previous office, and call
+   `GET /api/checkout/offices?localityId=<id>&locale=bg|en`. This returns
+   `{offices:[{id,code,name,address,locality,cityId}]}`; display `name` and
+   `address`. Require a selected office before proceeding.
+3. Submit the locality `id` as `receiving.cityId` and office `code` as
+   `receiving.officeCode`. The quote snapshots the provider's localized
+   locality, office name and address, plus the stable IDs. Order commitment
+   checks the same immutable snapshot against Econt again. If the selection
+   disappears, moves or its details change, recreate the quote.
+
+An invalid or unavailable selection returns HTTP 400 with `code:
+VALIDATION_ERROR` and `details: {"receiving.officeCode":"office_unavailable"}`.
+Malformed or missing input fields produce the standard field validation
+errors. An Econt outage or invalid provider response returns HTTP 503; do not
+treat it as an empty list. Lookups are public, rate-limited, and do not send
+customer data to Econt. As agreed, presence in the current city-specific
+`getOffices` response defines selectable; Econt's published response has no
+independently verified active-status field. A provider change after the final
+lookup cannot be made atomic with the local database transaction.
 
 Quotes enforce the inclusive EUR 2,000 aggregate ceiling and zero delivery
 fee. An over-limit cart returns `payable: false`, `CART_TOTAL_LIMIT_EXCEEDED`,
 `limitMinor: 200000` and `currency: "EUR"` without writing a quote.
-Selected-locality-only delivery is unavailable because this flow does not
-verify locality identifiers. Quotes do not reserve stock.
+Selected-locality-only delivery is unavailable because catalogue locality
+identifiers are not mapped to Econt city IDs. Quotes do not reserve stock.
 
 - `POST /api/orders`: commit a reserved order using `quoteId`,
   `quoteVersion`, `acceptedTermsVersion`, `accepted: true`, and an
