@@ -14,6 +14,7 @@ import {
 import { ProductReadService } from '../products/product-read.service';
 import { PublicContentService } from '../public-content/public-content.service';
 import type { CreateCheckoutQuoteDto } from './checkout.dto';
+import { EcontDirectoryService, invalidEcontOffice } from './econt-directory.service';
 import {
   checkoutConflict,
   checkoutMinorUnits,
@@ -28,6 +29,7 @@ export class CheckoutService {
     private readonly products: ProductReadService,
     private readonly evaluator: CommercialEvaluator,
     private readonly publicContent: PublicContentService,
+    private readonly econt: EcontDirectoryService,
   ) {}
 
   async quote(guestId: string, input: CreateCheckoutQuoteDto) {
@@ -42,18 +44,17 @@ export class CheckoutService {
     if (
       (receiving.method === 'store_pickup' &&
         [receiving.recipientName, receiving.phone, receiving.locality,
-          receiving.address, receiving.office].some((value) => value !== undefined)) ||
-      (receiving.method === 'econt_address' && receiving.office !== undefined) ||
-      (receiving.method === 'econt_office' && receiving.address !== undefined)
+          receiving.address, receiving.cityId, receiving.officeCode].some((value) => value !== undefined)) ||
+      (receiving.method === 'econt_address' &&
+        [receiving.cityId, receiving.officeCode].some((value) => value !== undefined)) ||
+      (receiving.method === 'econt_office' &&
+        [receiving.address, receiving.locality].some((value) => value !== undefined))
     ) {
       throw new BadRequestException({
         code: 'FIELD_INVALID',
         message_key: 'errors.validation',
       });
     }
-    const context: FulfilmentContext = receiving.method === 'store_pickup'
-      ? { method: 'store_pickup', locationCode: 'sofia' }
-      : { method: 'delivery', localityId: receiving.locality ?? '' };
     const unitIds = input.items.map((item) => item.unitId.toLowerCase());
     if (new Set(unitIds).size !== unitIds.length) {
       throw new BadRequestException({
@@ -62,6 +63,14 @@ export class CheckoutService {
       });
     }
     const ttlSeconds = this.config.getOrThrow<number>('CHECKOUT_QUOTE_TTL_SECONDS');
+    let office: Awaited<ReturnType<EcontDirectoryService['selectedOffice']>> | undefined;
+    if (receiving.method === 'econt_office') {
+      if (!receiving.cityId || !receiving.officeCode) throw invalidEcontOffice();
+      office = await this.econt.selectedOffice(receiving.cityId, receiving.officeCode, input.locale);
+    }
+    const context: FulfilmentContext = receiving.method === 'store_pickup'
+      ? { method: 'store_pickup', locationCode: 'sofia' }
+      : { method: 'delivery', localityId: office?.locality ?? receiving.locality ?? '' };
 
     return this.transactions.serializable(async (transaction) => {
       const stocks = await transaction.stockItem.findMany({
@@ -195,10 +204,11 @@ export class CheckoutService {
             country: 'BG',
             recipientName: receiving.recipientName,
             phone: receiving.phone,
-            locality: receiving.locality,
+            locality: office?.locality ?? receiving.locality,
             ...(receiving.method === 'econt_address'
               ? { address: receiving.address }
-              : { office: receiving.office }),
+              : { office: office?.name, officeAddress: office?.address,
+                  cityId: office?.cityId, officeId: office?.id, officeCode: office?.code }),
           };
       const expiresAt = new Date(Date.now() + ttlSeconds * 1000);
       const total = new Prisma.Decimal(totalMinor.toString()).dividedBy(100);

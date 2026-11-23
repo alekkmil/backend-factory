@@ -798,6 +798,8 @@ model Order {
   currency                       String             @db.VarChar(3)
   termsAcceptedAt                DateTime           @db.Timestamptz(3)
   termsActorReference            String             @db.VarChar(255)
+  paymentHoldExpiresAt           DateTime?          @db.Timestamptz(3)
+  paymentHoldExpiredAt           DateTime?          @db.Timestamptz(3)
   financialTermsPending          Boolean            @default(false)
   attentionCodes                 String[]           @default([])
   createdAt                      DateTime           @default(now()) @db.Timestamptz(3)
@@ -817,6 +819,7 @@ model Order {
   @@unique([number])
   @@index([guestId, createdAt])
   @@index([status, createdAt])
+  @@index([paymentHoldExpiresAt, id])
 }
 
 model SubmissionAttempt {

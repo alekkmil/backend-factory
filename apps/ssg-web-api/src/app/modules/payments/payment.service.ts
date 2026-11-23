@@ -14,6 +14,7 @@ import {
   CHECKOUT_QUOTE_INCLUDE, CheckoutValidationService, checkoutConflict,
 } from '../checkout/checkout-validation.service';
 import { boricaGatewayPublicKey, signBoricaPayment, verifyBoricaResponseSignature } from './borica-signature';
+import { paymentHold } from '../checkout/payment-hold';
 
 const EVIDENCE_FIELDS = [
   'ACTION', 'RC', 'APPROVAL', 'TERMINAL', 'TRTYPE', 'AMOUNT', 'CURRENCY',
@@ -25,6 +26,15 @@ function object(value: Prisma.JsonValue): Prisma.JsonObject {
     throw checkoutConflict('QUOTE_CHANGED');
   }
   return value;
+}
+
+function holdDeadlineViolation(error: unknown): boolean {
+  if (!(error instanceof Prisma.PrismaClientKnownRequestError)) return false;
+  const adapter = error.meta?.driverAdapterError;
+  if (!adapter || typeof adapter !== 'object' || !('cause' in adapter)) return false;
+  const cause = adapter.cause;
+  return !!cause && typeof cause === 'object' && 'originalCode' in cause &&
+    cause.originalCode === 'PHD01';
 }
 
 @Injectable()
@@ -60,6 +70,10 @@ export class PaymentService {
           await this.transactions.lockOrders(tx, [order.id]);
           const prior = await tx.bankPaymentAttempt.findUnique({ where: { orderId } });
           if (prior) return { status_code: 200, body: { attemptRef: prior.id } };
+          if (order.paymentHoldExpiredAt ||
+            (order.paymentHoldExpiresAt && order.paymentHoldExpiresAt.getTime() <= Date.now())) {
+            throw checkoutConflict('PAYMENT_HOLD_EXPIRED');
+          }
           await this.validation.validateQuote(tx, order.quoteIdRelation, order.id);
           const customer = object(order.customer);
           const cardholder = object(customer.cardholder ?? null);
@@ -113,6 +127,9 @@ export class PaymentService {
               terminal, amount, currency: 'EUR', order: bankOrder, timestamp, nonce,
             }, privateKey),
           };
+          if (order.paymentHoldExpiresAt && order.paymentHoldExpiresAt.getTime() <= Date.now()) {
+            throw checkoutConflict('PAYMENT_HOLD_EXPIRED');
+          }
           const attempt = await tx.bankPaymentAttempt.create({
             data: {
               orderId: order.id, gatewaySequence: sequence, bankOrder, terminal, nonce,
@@ -126,6 +143,7 @@ export class PaymentService {
         }),
       );
     } catch (error) {
+      if (holdDeadlineViolation(error)) throw checkoutConflict('PAYMENT_HOLD_EXPIRED');
       if (error instanceof ConflictException) {
         const body = error.getResponse();
         if (typeof body === 'object' && body !== null &&
@@ -138,11 +156,13 @@ export class PaymentService {
     if (result.replayed || result.status_code !== 201) return this.result(guestId, orderId);
     const attempt = await this.prisma.bankPaymentAttempt.findFirst({
       where: { id: String(result.body.attemptRef), order: { id: orderId, guestId, sandbox: false } },
+      include: { order: { select: { paymentHoldExpiresAt: true, paymentHoldExpiredAt: true } } },
     });
     if (!attempt) throw new Error('Committed payment attempt is unavailable');
     if (attempt.outcome !== 'pending') return this.result(guestId, orderId);
     return {
       attemptRef: attempt.id, outcome: 'pending', nextAction: 'submit_bank_form',
+      hold: paymentHold(attempt.order.paymentHoldExpiresAt, attempt.order.paymentHoldExpiredAt, attempt),
       form: { method: 'POST', url: attempt.gatewayUrl, fields: object(attempt.formFields) },
     };
   }
@@ -150,7 +170,7 @@ export class PaymentService {
   async result(guestId: string, orderId: string) {
     const order = await this.prisma.order.findFirst({
       where: { id: orderId, guestId, sandbox: false },
-      select: { total: true, bankPaymentAttempt: true },
+      select: { total: true, bankPaymentAttempt: true, paymentHoldExpiresAt: true, paymentHoldExpiredAt: true },
     });
     if (!order) throw new NotFoundException();
     const attempt = order.bankPaymentAttempt;
@@ -158,12 +178,15 @@ export class PaymentService {
       attemptRef: attempt?.id ?? null,
       outcome: attempt?.outcome ?? 'pending',
       bankVerified: attempt?.outcome === 'paid' || attempt?.outcome === 'failed',
+      hold: paymentHold(order.paymentHoldExpiresAt, order.paymentHoldExpiredAt, attempt),
       ...(attempt?.customerMessage
         ? { customerMessage: attempt.customerMessage, customerMessageVerified: false } : {}),
       totalMinor: order.total.mul(100).toNumber(), currency: 'EUR',
       ...(attempt?.outcome === 'paid' ? { verifiedPaidMinor: attempt.amount.mul(100).toNumber() } : {}),
       nextAction: attempt?.outcome === 'paid' ? 'view_order'
-        : !attempt ? 'back_to_review'
+        : !attempt ? (order.paymentHoldExpiredAt ||
+          (order.paymentHoldExpiresAt && order.paymentHoldExpiresAt.getTime() <= Date.now())
+          ? 'create_new_order' : 'back_to_review')
           : attempt.outcome === 'failed' || attempt.manualReviewRequired ? 'contact_support' : 'check_result',
     };
   }

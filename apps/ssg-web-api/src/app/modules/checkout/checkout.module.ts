@@ -14,6 +14,8 @@ import { OrderAccessController } from "./order-access.controller";
 import { OrderAccessService } from "./order-access.service";
 import { StockFactModule } from "../../common/stock-facts/stock-fact.module";
 import { PublicContentModule } from "../public-content/public-content.module";
+import { PaymentHoldExpiryService } from "./payment-hold-expiry.service";
+import { EcontDirectoryService } from "./econt-directory.service";
 
 @Module({
   imports: [
@@ -32,6 +34,8 @@ import { PublicContentModule } from "../public-content/public-content.module";
     CheckoutValidationService,
     OrdersService,
     OrderAccessService,
+    PaymentHoldExpiryService,
+    EcontDirectoryService,
   ],
   exports: [CheckoutValidationService, OrderAccessService],
 })
