@@ -203,8 +203,11 @@ For Econt office delivery:
    once and filter locally.
 2. Select a locality, clear any previous office, and call
    `GET /api/checkout/offices?localityId=<id>&locale=bg|en`. This returns
-   `{offices:[{id,code,name,address,locality,cityId}]}`; display `name` and
-   `address`. Require a selected office before proceeding.
+   `{offices:[{id,code,name,address,locality,cityId,locationType}]}`; display
+   `name` and `address`. `locationType` is `staffed_office`, `drop_box` or
+   `unknown`. It uses Econt's `isAPS`, `isMPS` and `isDrive` flags; mobile,
+   drive-through, missing or inconsistent flags return `unknown`. The type
+   does not change delivery eligibility. Require a selected office before proceeding.
 3. Submit the locality `id` as `receiving.cityId` and office `code` as
    `receiving.officeCode`. The quote snapshots the provider's localized
    locality, office name and address, plus the stable IDs. Order commitment

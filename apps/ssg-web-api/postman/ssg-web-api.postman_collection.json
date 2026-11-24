@@ -295,7 +295,7 @@
             "method": "GET",
             "header": [],
             "url": "{{baseUrl}}/api/checkout/offices?locale={{locale}}&localityId={{econtCityId}}",
-            "description": "Choose an entry, show its localized name/address, and copy code to econtOfficeCode. Presence in the current city-specific provider list is the agreed selectable rule, not independently verified active status."
+            "description": "Choose an entry, show its localized name/address, and copy code to econtOfficeCode. locationType is staffed_office, drop_box or unknown (including mobile, drive-through, missing or inconsistent provider flags); it does not change eligibility. Presence in the current city-specific provider list is the agreed selectable rule, not independently verified active status."
           },
           "response": []
         },
