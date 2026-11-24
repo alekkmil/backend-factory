@@ -9,6 +9,9 @@ import { hashIdempotencyPayload, TransactionService } from '../../common/transac
 import { ProductReadService } from '../products/product-read.service';
 import { CatalogueAdminService, catalogueSlugPreview } from './catalogue-admin.service';
 import { CataloguePublishDto } from './catalogue-admin.dto';
+import { PrismaService } from '../../database/prisma.service';
+import { MediaStorageService } from '../../common/media-storage.service';
+import { MEDIA_SELECT, verifyCatalogueMedia } from './catalogue-media-verification';
 
 @Injectable()
 export class CataloguePublishService {
@@ -20,27 +23,57 @@ export class CataloguePublishService {
     private readonly catalogue: CatalogueAdminService,
     private readonly products: ProductReadService,
     private readonly outbox: OutboxService,
+    private readonly db: PrismaService,
+    private readonly storage: MediaStorageService,
   ) {}
 
   async publish(actorId: string, id: string, input: CataloguePublishDto) {
-    if (
-      this.config.get<string>('NODE_ENV') === 'production' ||
-      !this.config.get<boolean>('DEV_CATALOGUE_PUBLISH_ENABLED')
-    ) {
+    const production = this.config.get<string>('NODE_ENV') === 'production';
+    if (!this.config.get<boolean>(production
+      ? 'PROD_CATALOGUE_PUBLISH_ENABLED' : 'DEV_CATALOGUE_PUBLISH_ENABLED')) {
       throw new ForbiddenException({
         code: 'FORBIDDEN', message_key: 'errors.forbidden',
       });
     }
+    const action = {
+      scopeKey: `catalogue-publish:${actorId}:${id}`,
+      requestId: input.request_id,
+      payload: {
+        expected_version: input.expected_version, revision_id: input.revision_id,
+        confirm_archive_exit: input.confirm_archive_exit ?? false,
+      },
+    };
+    const actionTakesPrecedence = async (): Promise<boolean> => {
+      const existing = await this.db.actionRequest.findUnique({
+        where: { scopeKey_requestId: { scopeKey: action.scopeKey, requestId: action.requestId } },
+        select: { payloadHash: true, state: true },
+      });
+      return !!existing && (existing.payloadHash !== hashIdempotencyPayload(action.payload) ||
+        existing.state === 'committed' || existing.state === 'rejected');
+    };
+    let verifiedMediaHash: string | undefined;
     try {
+      if (production && !await actionTakesPrecedence()) {
+        try {
+          const product = await this.db.product.findUnique({
+            where: { id }, select: { version: true },
+          });
+          const revision = await this.db.productRevision.findFirst({
+            where: { id: input.revision_id, productId: id, state: 'draft' },
+            select: { from_RevisionImage_revisionId: MEDIA_SELECT },
+          });
+          if (product?.version === input.expected_version && revision) {
+            verifiedMediaHash = await verifyCatalogueMedia(
+              this.storage, id, revision.from_RevisionImage_revisionId,
+            );
+          }
+        } catch (error) {
+          if (!(error instanceof ConflictException) && !(error instanceof ServiceUnavailableException)) throw error;
+          if (!await actionTakesPrecedence()) throw error;
+        }
+      }
       const result = await this.transactions.serializable((transaction) =>
-        this.transactions.executeIdempotentAction(transaction, {
-          scopeKey: `catalogue-publish:${actorId}:${id}`,
-          requestId: input.request_id,
-          payload: {
-            expected_version: input.expected_version, revision_id: input.revision_id,
-            confirm_archive_exit: input.confirm_archive_exit ?? false,
-          },
-        }, async () => {
+        this.transactions.executeIdempotentAction(transaction, action, async () => {
           const locks = await this.transactions.lockProducts(transaction, [id]);
           if (!locks.length) throw new NotFoundException();
           if (locks[0].version !== input.expected_version) this.conflict();
@@ -62,9 +95,12 @@ export class CataloguePublishService {
           });
           const revision = await transaction.productRevision.findUniqueOrThrow({
             where: { id: input.revision_id },
-            include: { from_ProductTranslation_revisionId: true },
+            include: { from_ProductTranslation_revisionId: true, from_RevisionImage_revisionId: MEDIA_SELECT },
           });
           if (revision.productId !== id || revision.state !== 'draft') this.conflict();
+          if (production && verifiedMediaHash !== hashIdempotencyPayload(revision.from_RevisionImage_revisionId)) {
+            throw new ConflictException({ code: 'MEDIA_NOT_READY', message_key: 'errors.media_not_ready' });
+          }
           if (revision.changeReason) {
             const reason = await transaction.dictionaryEntry.findUnique({
               where: { group_code: { group: 'restriction_reason', code: revision.changeReason } },
@@ -155,7 +191,6 @@ export class CataloguePublishService {
               version: { increment: 1 },
             },
           });
-          // Reuse public projection checks; no remote file reads or claimed byte verification.
           try {
             await this.products.assertPublicationMedia(transaction, id);
           } catch (error) {
@@ -175,7 +210,8 @@ export class CataloguePublishService {
               reason: revision.changeReason, note: revision.changeNote,
               eventKey: `catalogue-publish:${revision.id}`,
               before: { revision_id: live?.id ?? null, version: product.version },
-              after: { revision_id: revision.id, version: product.version + 1, media_verification: 'metadata_only_dev' },
+              after: { revision_id: revision.id, version: product.version + 1,
+                media_verification: production ? 's3_bytes_verified' : 'metadata_only_dev' },
             },
           });
           await this.outbox.enqueue(transaction, {

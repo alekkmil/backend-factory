@@ -70,10 +70,9 @@ export class CatalogueMediaService {
     input: CatalogueMediaRequestDto,
     files: Express.Multer.File[],
   ) {
-    if (
-      this.config.get<string>('NODE_ENV') === 'production' ||
-      !this.config.get<boolean>('DEV_CATALOGUE_PUBLISH_ENABLED')
-    )
+    const production = this.config.get<string>('NODE_ENV') === 'production';
+    if (!this.config.get<boolean>(production
+      ? 'PROD_CATALOGUE_PUBLISH_ENABLED' : 'DEV_CATALOGUE_PUBLISH_ENABLED'))
       throw new ForbiddenException();
     const byKey = new Map(files.map((file) => [file.fieldname, file]));
     if (
@@ -146,7 +145,7 @@ export class CatalogueMediaService {
           await this.prepare(productId, releaseId, metadata, file.buffer),
         );
       }
-      const cdn = configurationUrl(this.config, 'MEDIA_CDN_BASE_URL', false);
+      const cdn = configurationUrl(this.config, 'MEDIA_CDN_BASE_URL', production);
       for (const image of prepared) {
         await this.storage.put(
           image.originalKey,
@@ -308,7 +307,7 @@ export class CatalogueMediaService {
                   release_id: releaseId,
                   draft_revision_id: draft.id,
                   source_bytes_processed: true,
-                  approval: 'development_only',
+                  approval: production ? 'production_staff' : 'development_only',
                 },
               },
             });

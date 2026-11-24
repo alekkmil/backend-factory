@@ -6,6 +6,7 @@ const BASE_URL = 'https://ee.econt.com/services/Nomenclatures/NomenclaturesServi
 const CITY_ID = /^[1-9]\d{0,8}$/;
 const OFFICE_CODE = /^[A-Za-z0-9@._-]{1,80}$/;
 type Language = 'bg' | 'en';
+type LocationType = 'staffed_office' | 'drop_box' | 'unknown';
 
 function record(value: unknown): Record<string, unknown> | null {
   return value !== null && typeof value === 'object' && !Array.isArray(value)
@@ -21,6 +22,13 @@ function cityId(value: unknown): string | null {
   return typeof value === 'number' && Number.isSafeInteger(value) && CITY_ID.test(String(value))
     ? String(value)
     : null;
+}
+
+function locationType(office: Record<string, unknown> | null): LocationType {
+  if (office?.isMPS !== false || office.isDrive !== false) return 'unknown';
+  if (office.isAPS === true) return 'drop_box';
+  if (office.isAPS === false) return 'staffed_office';
+  return 'unknown';
 }
 
 export function invalidEcontOffice(): BadRequestException {
@@ -97,7 +105,10 @@ export class EcontDirectoryService {
           country?.code3 !== 'BGR' || !name || !fullAddress || !locality) {
         throw this.unavailable();
       }
-      return { id, code, name, address: fullAddress, locality, cityId: actualCityId };
+      return {
+        id, code, name, address: fullAddress, locality, cityId: actualCityId,
+        locationType: locationType(office),
+      };
     });
   }
 

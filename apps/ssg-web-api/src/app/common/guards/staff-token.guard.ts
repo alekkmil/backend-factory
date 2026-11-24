@@ -76,30 +76,36 @@ export class StaffTokenGuard implements CanActivate {
   private async resolveStaffAuth(
     request: StaffAuthenticatedRequest,
   ): Promise<StaffAuthContext> {
-    if (
-      this.config.get<string>('NODE_ENV') === 'production' ||
-      !this.config.get<boolean>('DEV_STAFF_AUTH_ENABLED')
-    ) {
+    const production = this.config.get<string>('NODE_ENV') === 'production';
+    const enabled = production
+      ? this.config.get<boolean>('PROD_STAFF_AUTH_ENABLED')
+      : this.config.get<boolean>('DEV_STAFF_AUTH_ENABLED');
+    if (!enabled) {
       throw this.unauthorized();
     }
-    const authToken = request.get('x-dev-staff-token');
+    const authToken = request.get(production ? 'x-prod-staff-token' : 'x-dev-staff-token');
     const csrfToken = request.get('x-csrf-token');
     const origin = request.get('origin');
     const approvedOrigins = this.config
       .getOrThrow<string>('CORS_ORIGINS')
       .split(',')
       .map((value) => value.trim());
-    if (!this.matchesConfiguredToken(authToken, 'DEV_STAFF_AUTH_TOKEN')) {
+    if (!this.matchesConfiguredToken(
+      authToken, production ? 'PROD_STAFF_AUTH_TOKEN' : 'DEV_STAFF_AUTH_TOKEN',
+    )) {
       throw this.unauthorized();
     }
     if (
-      !origin ||
-      !approvedOrigins.includes(origin) ||
-      !this.matchesConfiguredToken(csrfToken, 'DEV_STAFF_CSRF_TOKEN')
+      ((!production || origin !== undefined) && (!origin || !approvedOrigins.includes(origin))) ||
+      !this.matchesConfiguredToken(
+        csrfToken, production ? 'PROD_STAFF_CSRF_TOKEN' : 'DEV_STAFF_CSRF_TOKEN',
+      )
     ) {
       throw this.forbidden();
     }
-    const principalId = await this.ensureDevPrincipal();
+    const principalId = production
+      ? this.config.getOrThrow<string>('PROD_STAFF_PRINCIPAL_ID')
+      : await this.ensureDevPrincipal();
     return {
       principalId,
       csrfValidated: true,

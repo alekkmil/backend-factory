@@ -62,10 +62,9 @@ export class WebsiteMediaService {
     input: WebsiteMediaUploadDto,
     files: Express.Multer.File[],
   ) {
-    if (
-      this.config.get<string>('NODE_ENV') === 'production' ||
-      !this.config.get<boolean>('DEV_CATALOGUE_PUBLISH_ENABLED')
-    ) {
+    const production = this.config.get<string>('NODE_ENV') === 'production';
+    if (!this.config.get<boolean>(production
+      ? 'PROD_CATALOGUE_PUBLISH_ENABLED' : 'DEV_CATALOGUE_PUBLISH_ENABLED')) {
       throw new ForbiddenException();
     }
     const byKey = new Map(files.map((file) => [file.fieldname, file]));
@@ -137,24 +136,30 @@ export class WebsiteMediaService {
         if (!file) throw new BadRequestException();
         prepared.push(await this.prepare(releaseId, metadata, file.buffer));
       }
-      const cdn = configurationUrl(this.config, 'MEDIA_CDN_BASE_URL', false);
+      const cdn = configurationUrl(this.config, 'MEDIA_CDN_BASE_URL', production);
       for (const image of prepared) {
-        objectKeys.push(image.originalKey);
         await this.storage.put(
           image.originalKey,
           image.original,
           image.mime,
           true,
         );
+        objectKeys.push(image.originalKey);
         for (const derivative of image.derivatives) {
-          objectKeys.push(derivative.metadata.object_key);
           await this.storage.put(
             derivative.metadata.object_key,
             derivative.buffer,
             'image/webp',
             false,
           );
+          objectKeys.push(derivative.metadata.object_key);
         }
+      }
+      if (production) {
+        await this.storage.verifyImages(
+          `website/${releaseId}/`,
+          prepared.flatMap((image) => image.derivatives.map((derivative) => derivative.metadata)),
+        );
       }
 
       const result = await this.transactions.serializable((tx) =>

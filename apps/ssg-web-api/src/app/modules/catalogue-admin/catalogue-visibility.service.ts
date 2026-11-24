@@ -9,11 +9,14 @@ import {
 import { ConfigService } from '@nestjs/config';
 import { Prisma } from '../../../generated/prisma/client';
 import { OutboxService } from '../../common/outbox/outbox.service';
-import { TransactionService } from '../../common/transactions/transaction.service';
+import { hashIdempotencyPayload, TransactionService } from '../../common/transactions/transaction.service';
 import { ProductReadService } from '../products/product-read.service';
 import type { AdminProduct } from './catalogue-admin.dto';
 import { CatalogueVisibilityDto } from './catalogue-admin.dto';
 import { CatalogueAdminService } from './catalogue-admin.service';
+import { PrismaService } from '../../database/prisma.service';
+import { MediaStorageService } from '../../common/media-storage.service';
+import { MEDIA_SELECT, verifyCatalogueMedia } from './catalogue-media-verification';
 
 function isPrismaFailure(error: unknown): boolean {
   return error instanceof Prisma.PrismaClientKnownRequestError ||
@@ -31,6 +34,8 @@ export class CatalogueVisibilityService {
     private readonly catalogue: CatalogueAdminService,
     private readonly products: ProductReadService,
     private readonly outbox: OutboxService,
+    private readonly db: PrismaService,
+    private readonly storage: MediaStorageService,
   ) {}
 
   async setVisibility(
@@ -38,28 +43,62 @@ export class CatalogueVisibilityService {
     productId: string,
     request: CatalogueVisibilityDto,
   ): Promise<AdminProduct> {
-    if (
-      this.config.get<string>('NODE_ENV') === 'production' ||
-      !this.config.get<boolean>('DEV_CATALOGUE_PUBLISH_ENABLED')
-    ) {
+    const production = this.config.get<string>('NODE_ENV') === 'production';
+    if (!this.config.get<boolean>(production
+      ? 'PROD_CATALOGUE_PUBLISH_ENABLED' : 'DEV_CATALOGUE_PUBLISH_ENABLED')) {
       throw new ForbiddenException({
         code: 'FORBIDDEN',
         message_key: 'errors.forbidden',
       });
     }
 
+    const action = {
+      scopeKey: `catalogue-visibility:${actorId}:${productId}`,
+      requestId: request.request_id,
+      payload: {
+        expected_version: request.expected_version,
+        publication_status: request.publication_status,
+        reason: request.reason,
+        note: request.note.normalize('NFC').trim(),
+      },
+    };
+    const actionTakesPrecedence = async (): Promise<boolean> => {
+      const existing = await this.db.actionRequest.findUnique({
+        where: { scopeKey_requestId: { scopeKey: action.scopeKey, requestId: action.requestId } },
+        select: { payloadHash: true, state: true },
+      });
+      return !!existing && (existing.payloadHash !== hashIdempotencyPayload(action.payload) ||
+        existing.state === 'committed' || existing.state === 'rejected');
+    };
+    let verified: { revisionId: string; hash: string } | undefined;
     try {
+      if (production && request.publication_status === 'published' && !await actionTakesPrecedence()) {
+        try {
+          const product = await this.db.product.findUnique({
+            where: { id: productId },
+            select: {
+              version: true,
+              publicationStatus: true,
+              currentRevisionIdRelation: {
+                select: { id: true, state: true, from_RevisionImage_revisionId: MEDIA_SELECT },
+              },
+            },
+          });
+          const revision = product?.currentRevisionIdRelation;
+          if (product?.version === request.expected_version &&
+              product.publicationStatus === 'hidden' && revision?.state === 'published') {
+            verified = {
+              revisionId: revision.id,
+              hash: await verifyCatalogueMedia(this.storage, productId, revision.from_RevisionImage_revisionId),
+            };
+          }
+        } catch (error) {
+          if (!(error instanceof ConflictException) && !(error instanceof ServiceUnavailableException)) throw error;
+          if (!await actionTakesPrecedence()) throw error;
+        }
+      }
       const replay = await this.transactions.serializable((transaction) =>
-        this.transactions.executeIdempotentAction(transaction, {
-          scopeKey: `catalogue-visibility:${actorId}:${productId}`,
-          requestId: request.request_id,
-          payload: {
-            expected_version: request.expected_version,
-            publication_status: request.publication_status,
-            reason: request.reason,
-            note: request.note.normalize('NFC').trim(),
-          },
-        }, async () => {
+        this.transactions.executeIdempotentAction(transaction, action, async () => {
           const locks = await this.transactions.lockProducts(transaction, [productId]);
           if (!locks.length) throw new NotFoundException();
           if (locks[0].version !== request.expected_version) this.conflict();
@@ -74,6 +113,7 @@ export class CatalogueVisibilityService {
                   id: true,
                   productId: true,
                   state: true,
+                  from_RevisionImage_revisionId: MEDIA_SELECT,
                 },
               },
             },
@@ -91,6 +131,13 @@ export class CatalogueVisibilityService {
             request.publication_status === 'published' &&
             product.publicationStatus !== 'hidden'
           ) this.conflict();
+          if (production && request.publication_status === 'published' &&
+              (verified?.revisionId !== current.id ||
+                verified.hash !== hashIdempotencyPayload(current.from_RevisionImage_revisionId))) {
+            throw new ConflictException({
+              code: 'MEDIA_NOT_READY', message_key: 'errors.media_not_ready',
+            });
+          }
           if (
             request.publication_status === 'hidden' &&
             product.publicationStatus !== 'published'
@@ -160,6 +207,8 @@ export class CatalogueVisibilityService {
                 publication_status: updated.publicationStatus,
                 version: updated.version,
                 current_revision_id: current.id,
+                ...(production && request.publication_status === 'published'
+                  ? { media_verification: 's3_bytes_verified' } : {}),
               },
             },
           });
