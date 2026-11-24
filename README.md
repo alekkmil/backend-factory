@@ -343,7 +343,7 @@ the dev database and frontend CORS origin, and replace all example credentials.
 For this development instance, use `NODE_ENV=development` and keep
 `DEV_STAFF_AUTH_ENABLED=false` and `OUTBOX_WORKER_ENABLED=false` unless those
 development features are explicitly configured.
-Real production staff authentication is not implemented by this deployment.
+Production staff authentication is configured separately as described below.
 If local capture is intentionally enabled in a development environment, keep
 its private directory under `/srv/ssg-web-api/shared`, never in a release
 directory.
@@ -363,6 +363,119 @@ If deployment fails its health check, inspect the application's retained PM2
 error/output logs under the deployment user's `PM2_HOME` (usually `~/.pm2/logs`).
 The action reports connection/HTTP failures without printing response bodies;
 a PM2 `online` status alone does not prove the application finished startup.
+
+### Production deployment to AWS Lightsail
+
+[Deploy ssg-web-api (production)](.github/workflows/deploy-ssg-web-api-prod.yml)
+runs when a pull request targeting `prod` is merged. Closing an unmerged pull
+request or pushing directly to `prod` does not deploy. Protect `prod` against
+direct pushes and require reviewed pull requests. Merges performed by a
+workflow using `GITHUB_TOKEN` do not trigger this workflow; use an authorized
+human or appropriately scoped GitHub App for promotion. The workflow checks out the
+exact merge commit and skips a release if `prod` has already advanced. A
+deployment already in progress is not interrupted. GitHub does not provide
+environment secrets to `pull_request` workflows from forks, including
+Dependabot pull requests; promote such changes through a same-repository pull
+request before deploying.
+
+Before the first merge that can trigger deployment:
+
+1. Create a **separate production Lightsail instance** and production
+   PostgreSQL database. Follow the DEV server setup above for Node.js 24,
+   npm, PM2, SSH, the application directory, HTTPS proxy and firewall. Never
+   point the production deployment at the DEV host or database.
+2. On the production server only, as the deployment user, create the
+   production marker after `/srv/ssg-web-api` is provisioned:
+
+   ```sh
+   install -d -m 700 /srv/ssg-web-api/shared
+   printf '%s\n' 'ssg-web-api-production' > /srv/ssg-web-api/shared/production-deployment-marker
+   chmod 600 /srv/ssg-web-api/shared/production-deployment-marker
+   ```
+
+   The workflow checks this marker over verified SSH before uploading anything.
+   Do not create it on DEV.
+3. In GitHub, create the **environment** `ssg-web-api-prod`, restrict its
+   deployment branches to `prod`, and configure required reviewers and prevent
+   self-review where supported. Add environment secrets `SSH_HOST`, `SSH_USER`,
+   `SSH_PRIVATE_KEY`, `SSH_KNOWN_HOSTS`, and `APP_ENV`, using production-only
+   values. Verify the SSH host key through a trusted channel. GitHub may create
+   an unprotected environment automatically if it does not already exist, so
+   configure protections before allowing deployment.
+4. Set `APP_ENV` as the complete production dotenv configuration, including
+   `NODE_ENV=production`, `PORT=3001`, production `DATABASE_URL`, frontend
+   origins, and production media and SMTP settings. Keep development staff
+   authentication, development publication and local test mail disabled.
+   The workflow rejects a non-production environment or port before migration.
+   Changes to the server's environment file alone are overwritten by the next
+   deployment; update the GitHub environment secret instead.
+5. Before enabling checkout, complete the bank's production acceptance and
+   configure its real terminal, credentials, signing and verification keys,
+   gateway, callback, return URLs, access encryption key, SMTP and outbox.
+   Do not copy DEV bank or
+   database credentials into production.
+6. Review every pending migration, take and verify a restorable database
+   backup, and validate checkout hold/payment concurrency before deployment.
+   The workflow uses the same server script as DEV: it applies pending
+   migrations before restarting PM2, and application rollback never reverses
+   applied migrations. Keep checkout disabled until these prerequisites and
+   the bank integration are approved.
+
+The workflow builds, typechecks and lints the selected commit, then uses the
+existing release, health-check and application rollback process. GitHub Actions
+and production server access are required to verify the first deployment; a
+local build does not prove the server, secrets, migration or bank setup.
+
+#### Production Postman staff authentication
+
+This is an opt-in, single-operator credential pair for trusted server-side or
+Postman use, not a browser login. It grants the configured staff principal
+access to all currently reachable routes protected by `StaffTokenGuard`; it
+does not provide per-operation permissions. Both credentials are long-lived
+secrets: the second header is not a session-bound CSRF token or MFA. Restrict
+production admin access and rate-limit attempts at the gateway or firewall.
+Never put these credentials in frontend code, shared Postman collections,
+logs, or source control. Rotate both on exposure or operator change.
+
+Create a dedicated, enabled `staff` Principal in the production database through
+an approved administrator workflow; record its UUID. It must remain enabled
+and of kind `staff` on every request. Disabling it revokes access without
+changing the credentials. Production authentication never creates the
+principal or grants database permissions automatically. For a first-time
+setup, an authorized database administrator can insert one explicitly:
+
+```sql
+INSERT INTO "Principal" ("id", "externalSubject", "kind", "displayName", "updatedAt")
+VALUES (gen_random_uuid(), 'prod:postman-operator', 'staff', 'Production Postman operator', now())
+RETURNING "id";
+```
+
+If that subject already exists, inspect it rather than running an upsert that
+could re-enable an intentionally disabled principal. This SQL is not run by
+the application or deployment workflow.
+
+Set these in the `ssg-web-api-prod` GitHub environment's `APP_ENV` secret:
+
+```dotenv
+PROD_STAFF_AUTH_ENABLED=true
+PROD_STAFF_AUTH_TOKEN=<32 random bytes, lowercase hex>
+PROD_STAFF_CSRF_TOKEN=<different 32 random bytes, lowercase hex>
+PROD_STAFF_PRINCIPAL_ID=<enabled staff principal UUID>
+```
+
+Generate each token independently using `openssl rand -hex 32` in a private
+terminal. Do not reuse DEV credentials. The production guard uses
+`X-Prod-Staff-Token` and `X-CSRF-Token` headers. For Postman, `Origin` may be
+omitted; when present it must match `CORS_ORIGINS`. The DEV guard continues to
+require `X-Dev-Staff-Token`, `X-CSRF-Token`, and an allowed `Origin`.
+Production authentication cannot be enabled outside `NODE_ENV=production`.
+
+Authentication alone does not enable production catalogue publishing or image
+uploads. Set `PROD_CATALOGUE_PUBLISH_ENABLED=true` on the production server to
+opt in to catalogue uploads/publication/visibility and website media uploads.
+Metadata-only media registration remains disabled in production. The internal
+stock-fact routes use the production staff credentials independently of the
+catalogue publication flag.
 
 To add another application, create its own direct workflow, GitHub environment,
 server directory and unique PM2 process name (derived from the application name).
@@ -849,9 +962,11 @@ the entire SEO brief is implemented.
 
 ### Development website content management
 
-All routes below use the same development-only `StaffTokenGuard` as catalogue
-import: `DEV_STAFF_AUTH_ENABLED=true`, `X-Dev-Staff-Token`, `X-CSRF-Token`
-and an allowed `Origin`. They reject production authentication. Saves update
+All routes below use `StaffTokenGuard`. Development uses
+`DEV_STAFF_AUTH_ENABLED=true`, `X-Dev-Staff-Token`, `X-CSRF-Token` and an
+allowed `Origin`; production uses the Postman credentials described above.
+Production editorial media upload requires `PROD_CATALOGUE_PUBLISH_ENABLED=true`.
+Saves update
 the public data directly when a translation has `published: true`; no separate
 publication call is required. Unpublished translations stay out of public
 responses. Existing product import/media/publication endpoints remain unchanged.
@@ -872,8 +987,9 @@ Editorial media is separately stored from product media and requires the
 `20261110140000_add_website_editorial_media` migration. Do not apply migrations
 outside the normal reviewed deployment process.
 
-Editorial upload is multipart form data, gated by the same dev staff auth and
-`DEV_CATALOGUE_PUBLISH_ENABLED=true` (non-production only). Add a text part
+Editorial upload is multipart form data, gated by staff authentication and
+`DEV_CATALOGUE_PUBLISH_ENABLED=true` outside production or
+`PROD_CATALOGUE_PUBLISH_ENABLED=true` in production. Add a text part
 named `metadata` containing `{"request_id":"<UUID>","images":[...]}` and one
 file part named `image_<client_key>` per image. Each image entry has
 `client_key`, localized `alt_bg`/`alt_en`, and `processed_with_ai`. Upload
@@ -883,7 +999,8 @@ aspect-preserving WebP variants at 200/400/800/1600 pixels, stores the original
 privately, and returns an approved `media.id` plus BG/EN public variants.
 Publishing the media makes the assets usable, but does not publish a page or
 store; reference the returned UUID in a published content section or store.
-Use a new request ID for new bytes/metadata; approved media is immutable.
+Use a new request ID for new bytes/metadata. Approved records cannot be patched,
+but S3 credentials with overwrite/delete access can still change stored objects.
 An optional per-image boolean `on_model_illustrative` defaults to false;
 set it to true for illustrative model composites. `processed_with_ai: true`
 sets `ai_disclosure_required: true`, independently of the illustrative flag.
@@ -1388,8 +1505,11 @@ independent. Empty search queries retain their existing empty-result behavior.
 Visibility body: `{request_id,expected_version,publication_status,reason,note}`.
 The requested status is `hidden` or `published`, never `draft`.
 Restoration requires an existing released current revision, valid current routes
-and publication-ready media. Visibility writes also require
-`DEV_CATALOGUE_PUBLISH_ENABLED=true`; production use remains disabled.
+and publication-ready media. Visibility writes require
+`DEV_CATALOGUE_PUBLISH_ENABLED=true` outside production or
+`PROD_CATALOGUE_PUBLISH_ENABLED=true` in production. In production, restoration
+verifies the selected S3 derivatives before making the product visible; hiding
+does not depend on S3 availability.
 Hiding preserves editorial data and URL history while excluding the product
 from public reads. It is not deletion or a draft publication operation.
 
@@ -1445,23 +1565,20 @@ per-operation database permission grants are required. The fixed development
 Principal is created automatically for audit attribution with no permissions
 granted. Existing permission arrays are left untouched and ignored by these
 endpoints. Disabled or non-staff Principals are still rejected on every request.
-`DEV_STAFF_AUTH_ENABLED=true` is required; token authentication is rejected in
-production. Production staff authentication is not provided by this adapter.
+`DEV_STAFF_AUTH_ENABLED=true` is required for the development adapter.
+Production uses the separately configured Postman staff credentials above.
 
-### Explicit development publication
+### Explicit catalogue publication
 
 `POST /api/admin/catalogue/:id/publish` explicitly publishes the exact current
-draft. Import/commit never publishes automatically. This implementation is
-**development-only and metadata-only**: it does not fetch/decode image files,
-verify their hashes against storage or upload files. Enable it explicitly with
-`DEV_CATALOGUE_PUBLISH_ENABLED=true`;
-production rejects that setting at startup and the endpoint independently
-rejects production use. Real storage verification is still required before
-production publication can be enabled.
+draft. Import/commit never publishes automatically. Enable it with
+`DEV_CATALOGUE_PUBLISH_ENABLED=true` outside production or
+`PROD_CATALOGUE_PUBLISH_ENABLED=true` in production. Development publication
+checks metadata only. Production publication reads and decodes each selected
+S3 WebP derivative, checking its length, dimensions and SHA-256 against the
+draft metadata before committing the exact verified revision.
 
-The endpoint uses the same two development staff tokens as catalogue reads and
-imports, with allowed Origin and CSRF checks. No database permission grant or
-SQL setup is needed.
+The endpoint uses the configured staff authentication and CSRF checks.
 
 First call `GET /api/admin/catalogue/:id`. Use its current `version` and
 `draft_revision_id`, not guessed values:
@@ -1526,19 +1643,26 @@ No schema migration is required.
 
 ### New-product catalogue import
 
-#### Development multipart media attachment
+#### Multipart media attachment
 
 `POST /api/admin/catalogue/:id/media` accepts actual image files, separately
-from product import. It requires the same token pair/Origin checks,
-`DEV_CATALOGUE_PUBLISH_ENABLED=true`, and a non-production environment.
+from product import. It requires staff authentication and
+`DEV_CATALOGUE_PUBLISH_ENABLED=true` outside production or
+`PROD_CATALOGUE_PUBLISH_ENABLED=true` in production.
 Configure `AWS_S3_ACCESS_KEY_ID`, `AWS_S3_SECRET_ACCESS_KEY`, and
 `AWS_S3_BUCKET_URL` (HTTPS S3 bucket URL, not a CDN URL or path prefix).
 The S3 region is `eu-central-1`. `MEDIA_CDN_BASE_URL` is the public derivative
 base URL; configure its storage access policy outside this application.
-Credentials need scoped PutObject/DeleteObject access to the product media
-prefixes. Originals under `private/products/` must not be publicly readable;
-only `products/` derivatives should be readable through your CDN. The API
-does not change bucket ACLs, policies or CORS.
+Credentials need scoped PutObject/DeleteObject access to the product and
+website media prefixes, plus GetObject for derivative verification. Originals
+under `private/products/` and `private/website/` must not be publicly readable;
+only `products/` and `website/` derivatives should be readable through your CDN.
+Use the production bucket and HTTPS CDN URL in production; object keys use
+release-specific UUID paths without a `prod/` prefix. The API does not change
+bucket ACLs, policies or CORS. Uploads use conditional writes, but credentials
+capable of unconditional overwrite or deletion can still change existing objects;
+the user has accepted this risk. Verification is point-in-time, not a guarantee
+of future object integrity or CDN delivery.
 
 Multipart field `metadata` contains JSON:
 
@@ -1580,11 +1704,12 @@ Accepts 1..5 JPEG/PNG/WebP files, up to 10 MiB each, one metadata field up to
 longest source side must be at least 1600px. The backend auto-orients, strips
 derivative EXIF metadata, flattens transparency onto white, and generates
 square 200/400/800/1600 sRGB WebP variants using white padding without upscaling
-the image content. It measures generated bytes/hashes and uploads immutable,
-server-selected keys. Original bytes are stored under the private prefix.
+the image content. It measures generated bytes/hashes and uploads to
+release-specific server-selected keys. Original bytes are stored under the
+private prefix.
 
 Returns HTTP 200 `AdminProduct` with incremented version and its draft UUID.
-Existing images are preserved in a new immutable release; new sort orders
+Existing images are preserved in a new release; new sort orders
 must follow existing ones. Exactly one main image remains first at order 1.
 At most 50 images may be selected in total. If no draft exists, it clones the
 current revision including translations/composition/fulfilment into a draft.
@@ -1598,7 +1723,8 @@ Uploads precede the database transaction. Known rolled-back uploads are
 cleaned up; cleanup/dependency ambiguity is explicitly logged for reconciliation
 and never deletes files referenced by a committed release. Crashes can leave
 orphans: provision periodic S3 reconciliation/lifecycle management separately.
-This is development approval, not a production human-review workflow.
+Staff upload approves the media record; no separate human-review workflow is
+implemented.
 S3 failures log only bounded error identifiers, HTTP status, network error code
 and configured region, never the raw AWS exception, credentials or request.
 For upload failures, check the code: `AccessDenied` indicates IAM/bucket policy
@@ -1704,8 +1830,8 @@ No database migration is needed.
 | Record documented physical absence | `POST /internal/stock/:stock_item_id/physical-absence` |
 | Record a documented actual store sale | `POST /internal/stock/:stock_item_id/store-sale` |
 
-Admin operations use the existing opt-in development staff token/Origin/CSRF
-guard. Promotion requires a committed batch row containing the genuine barcode,
+Admin operations use the configured opt-in staff authentication. Promotion
+requires a committed batch row containing the genuine barcode,
 matching `BarcodeIdentity` ownership and no existing operational `StockItem`.
 It never overwrites existing stock, exits archive mode or publishes a product.
 Original staging payloads remain immutable; admin staged counts are derived from
@@ -1754,17 +1880,18 @@ It cannot change barcode, product, status, location, reservation or sale history
 Its response is `{stock_item_id, version, price, facts}`. Existing quote/order
 snapshots and actual sale amounts remain unchanged.
 
-The `/internal/stock` routes are **not registered in production**. In development,
-they use the same `StaffTokenGuard` as import, commit, promotion and publication:
-enable `DEV_STAFF_AUTH_ENABLED` and send `X-Dev-Staff-Token`, `X-CSRF-Token`
-and an allowed `Origin`. The authenticated, enabled staff principal is recorded
-as the actor; no service principal or `stock_fact_write` grant is needed for
-these development HTTP routes. The former `DEV_STOCK_FACT_AUTH_*`,
+The `/internal/stock` routes use the same `StaffTokenGuard` as import, commit,
+promotion and publication. In development, enable `DEV_STAFF_AUTH_ENABLED` and
+send `X-Dev-Staff-Token`, `X-CSRF-Token` and an allowed `Origin`. In production,
+enable `PROD_STAFF_AUTH_ENABLED`, configure its enabled staff principal and send
+`X-Prod-Staff-Token` and `X-CSRF-Token`; `Origin` may be omitted, but must be
+allowed if provided. The authenticated staff principal is recorded as the actor;
+no separate `stock_fact_write` grant is needed for these HTTP routes. The former `DEV_STOCK_FACT_AUTH_*`,
 `DEV_STOCK_FACT_CSRF_TOKEN`, `DEV_STOCK_FACT_PRINCIPAL_ID` and
 `X-Dev-Stock-Token` are no longer used.
-`STOCK_FACT_SOURCE_CODE` is optional for development staff and defaults to
-`dev-staff-stock`; keep any existing configured source identifier unchanged
-to preserve source-event deduplication across the authentication change.
+`STOCK_FACT_SOURCE_CODE` is optional for staff and defaults to `dev-staff-stock`
+outside production and `prod-staff-stock` in production. Keep the chosen
+source identifier stable to preserve source-event deduplication.
 Non-HTTP service callers still require an enabled service principal with
 `stock_fact_write` and a configured source identifier.
 Keep these internal routes restricted by deployment networking.

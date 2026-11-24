@@ -165,11 +165,19 @@ export function validateEnvironment(
   const devStaffAuthEnabled = environment.DEV_STAFF_AUTH_ENABLED ?? 'false';
   const devCataloguePublish =
     environment.DEV_CATALOGUE_PUBLISH_ENABLED ?? 'false';
+  const prodCataloguePublish =
+    environment.PROD_CATALOGUE_PUBLISH_ENABLED ?? 'false';
   if (devCataloguePublish !== 'true' && devCataloguePublish !== 'false') {
     throw new Error('DEV_CATALOGUE_PUBLISH_ENABLED must be true or false');
   }
   if (devCataloguePublish === 'true' && nodeEnv === 'production') {
     throw new Error('Metadata-only catalogue publication is development-only');
+  }
+  if (prodCataloguePublish !== 'true' && prodCataloguePublish !== 'false') {
+    throw new Error('PROD_CATALOGUE_PUBLISH_ENABLED must be true or false');
+  }
+  if (prodCataloguePublish === 'true' && nodeEnv !== 'production') {
+    throw new Error('Production catalogue publication requires NODE_ENV=production');
   }
   if (devStaffAuthEnabled !== 'true' && devStaffAuthEnabled !== 'false') {
     throw new Error('DEV_STAFF_AUTH_ENABLED must be true or false');
@@ -187,6 +195,31 @@ export function validateEnvironment(
           `${name} must contain at least 32 characters when development staff authentication is enabled`,
         );
       }
+    }
+  }
+
+  const prodStaffAuthEnabled = environment.PROD_STAFF_AUTH_ENABLED ?? 'false';
+  if (prodStaffAuthEnabled !== 'true' && prodStaffAuthEnabled !== 'false') {
+    throw new Error('PROD_STAFF_AUTH_ENABLED must be true or false');
+  }
+  if (prodStaffAuthEnabled === 'true') {
+    if (nodeEnv !== 'production') {
+      throw new Error('Production staff authentication requires NODE_ENV=production');
+    }
+    for (const name of ['PROD_STAFF_AUTH_TOKEN', 'PROD_STAFF_CSRF_TOKEN']) {
+      const token = environment[name];
+      if (typeof token !== 'string' || !/^[a-f0-9]{64}$/.test(token)) {
+        throw new Error(`${name} must be a 32-byte random token encoded as lowercase hexadecimal`);
+      }
+    }
+    if (environment.PROD_STAFF_AUTH_TOKEN === environment.PROD_STAFF_CSRF_TOKEN) {
+      throw new Error('Production staff tokens must be distinct');
+    }
+    if (typeof environment.PROD_STAFF_PRINCIPAL_ID !== 'string' ||
+        !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+          environment.PROD_STAFF_PRINCIPAL_ID,
+        )) {
+      throw new Error('PROD_STAFF_PRINCIPAL_ID must be a valid staff principal UUID');
     }
   }
 
@@ -312,7 +345,9 @@ export function validateEnvironment(
     CHECKOUT_ENABLED: checkoutEnabled === 'true',
     ...checkoutNumbers,
     DEV_STAFF_AUTH_ENABLED: devStaffAuthEnabled === 'true',
+    PROD_STAFF_AUTH_ENABLED: prodStaffAuthEnabled === 'true',
     DEV_CATALOGUE_PUBLISH_ENABLED: devCataloguePublish === 'true',
+    PROD_CATALOGUE_PUBLISH_ENABLED: prodCataloguePublish === 'true',
     OUTBOX_WORKER_ENABLED: outboxWorkerEnabled === 'true',
     LOCAL_TEST_MAIL_ENABLED: localTestMailEnabled === 'true',
     STOCK_FACT_SOURCE_CODE: stockFactSourceCode,
