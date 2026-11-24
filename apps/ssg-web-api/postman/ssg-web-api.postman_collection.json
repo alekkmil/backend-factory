@@ -884,7 +884,7 @@
       "name": "Catalogue publication",
       "item": [
         {
-          "name": "Upload and append media to draft (development only)",
+          "name": "Upload and append media to draft (development credentials)",
           "request": {
             "method": "POST",
             "header": [
@@ -903,12 +903,12 @@
                 { "key": "image_front", "type": "file", "src": [] }
               ]
             },
-            "description": "Select a real JPEG/PNG/WebP file (longest side >=1600px; <=10MiB). Let Postman generate multipart Content-Type. Uses S3 eu-central-1; requires DEV_CATALOGUE_PUBLISH_ENABLED and configured bucket credentials plus MEDIA_CDN_BASE_URL. Generates measured square WebP derivatives and appends to draft; does not publish. Copy returned version/draft UUID before publishing. When appending to an existing main image, use a different client_key, non-main role and sort_order greater than existing maximum. Supports <=5 new files, <=50 total selected images. Match each binary field image_<client_key> to metadata. Same request/bytes replay; changed payload409. S3 policies must keep private/products originals private."
+            "description": "Select a real JPEG/PNG/WebP file (longest side >=1600px; <=10MiB). This request uses development credentials and requires DEV_CATALOGUE_PUBLISH_ENABLED. For production use X-Prod-Staff-Token, the production CSRF token and PROD_CATALOGUE_PUBLISH_ENABLED=true. Configure S3 eu-central-1 credentials and MEDIA_CDN_BASE_URL. Generates measured square WebP derivatives and appends to draft; does not publish. Copy returned version/draft UUID before publishing. When appending to an existing main image, use a different client_key, non-main role and sort_order greater than existing maximum. Supports <=5 new files, <=50 total selected images. Match each binary field image_<client_key> to metadata. Same request/bytes replay; changed payload409. Keep private/products originals private."
           },
           "response": []
         },
         {
-          "name": "Publish exact current draft (development only)",
+          "name": "Publish exact current draft (development credentials)",
           "request": {
             "method": "POST",
             "header": [
@@ -923,7 +923,7 @@
               "options": { "raw": { "language": "json" } }
             },
             "url": "{{baseUrl}}/api/admin/catalogue/{{productId}}/publish",
-            "description": "Set productVersion and draftRevisionId from the current admin detail response. Requires explicit DEV_CATALOGUE_PUBLISH_ENABLED=true, valid public site/CDN configuration, the configured development staff token pair and allowed Origin, and approved media already registered and attached. No database permission grant. Does not upload/register/approve/attach media or inspect actual files. Development metadata-only publication is rejected in production. Image-less drafts fail MEDIA_NOT_READY. Reuse publishRequestId and the exact payload on retries; changed payload returns 409. Archive exits additionally require confirm_archive_exit:true and a reviewed draft reason/note. Success200 returns AdminProduct with draft consumed and published_revision_id set."
+            "description": "This request uses development credentials and requires DEV_CATALOGUE_PUBLISH_ENABLED=true; development publication checks metadata only. In production use X-Prod-Staff-Token with the production CSRF token and enable PROD_CATALOGUE_PUBLISH_ENABLED=true. Production verifies actual S3 derivatives before publishing. Set productVersion and draftRevisionId from current admin detail. Image-less drafts fail MEDIA_NOT_READY. Reuse publishRequestId and exact payload on retries; changed payload returns 409. Archive exits require confirm_archive_exit:true and a reviewed draft reason/note. Success200 returns AdminProduct with the draft consumed."
           },
           "response": []
         }
@@ -1117,7 +1117,7 @@
               "options": { "raw": { "language": "json" } }
             },
             "url": "{{baseUrl}}/internal/stock/{{stockItemId}}/physical-absence",
-            "description": "Uses the same development staff token, CSRF token and allowed Origin as import, commit and publish. Unregistered in production. Blocks unsold stock; no sale is inferred."
+            "description": "This request uses development staff credentials. In production enable PROD_STAFF_AUTH_ENABLED and use X-Prod-Staff-Token and X-CSRF-Token; Origin is optional but must be allowed if provided. Blocks unsold stock; no sale is inferred."
           },
           "response": []
         },
@@ -1137,7 +1137,7 @@
               "options": { "raw": { "language": "json" } }
             },
             "url": "{{baseUrl}}/internal/stock/{{stockItemId}}/store-sale",
-            "description": "Actual documented sale only; example price/currency are synthetic. Uses the same development staff token, CSRF token and allowed Origin as import, commit and publish. Unregistered in production. Source event replay survives observed version changes; contradictory sale facts conflict. All actual units sold autoarchives without publishing drafts."
+            "description": "Actual documented sale only; example price/currency are synthetic. This request uses development staff credentials. In production enable PROD_STAFF_AUTH_ENABLED and use X-Prod-Staff-Token and X-CSRF-Token; Origin is optional but must be allowed if provided. Source event replay survives observed version changes; contradictory sale facts conflict. All actual units sold autoarchives without publishing drafts."
           },
           "response": []
         }
@@ -1172,7 +1172,7 @@
               ]
             },
             "url": "{{baseUrl}}/api/admin/website/media",
-            "description": "Select an image file for image_hero. Supports 1-5 JPEG/PNG/WebP files up to 10 MiB each, with a 1600px minimum long edge. nginx must allow 51 MiB including multipart overhead (see tools/deploy/ssg-web-api-nginx-uploads.conf). Include one metadata image item and matching image_<client_key> file per asset. For AI model composites set processed_with_ai and on_model_illustrative to true. Approved metadata is immutable: re-upload with a new request ID to correct flags, then replace references with the new UUIDs. Requires DEV_CATALOGUE_PUBLISH_ENABLED=true as well as staff auth. Returns approved media IDs and BG/EN public variants; add the returned UUID to image sections, link_cards items, or store media_ids. Upload does not publish or edit a page/store."
+            "description": "Select an image file for image_hero. Supports 1-5 JPEG/PNG/WebP files up to 10 MiB each, with a 1600px minimum long edge. nginx must allow 51 MiB including multipart overhead (see tools/deploy/ssg-web-api-nginx-uploads.conf). Include one metadata image item and matching image_<client_key> file per asset. For AI model composites set processed_with_ai and on_model_illustrative to true. Re-upload with a new request ID to correct flags, then replace references with the new UUIDs. This request uses development staff credentials and DEV_CATALOGUE_PUBLISH_ENABLED=true. In production use the production staff credentials and PROD_CATALOGUE_PUBLISH_ENABLED=true; uploaded S3 derivatives are verified before approval. Returns approved media IDs and BG/EN public variants. Upload does not publish or edit a page/store."
           },
           "response": []
         },

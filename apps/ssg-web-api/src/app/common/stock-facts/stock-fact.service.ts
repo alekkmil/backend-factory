@@ -147,6 +147,7 @@ export class StockFactService {
   private readonly logger = new Logger(StockFactService.name);
   private readonly sourceCode: string;
   private readonly devStaffAccess: boolean;
+  private readonly prodStaffPrincipalId: string | undefined;
 
   constructor(
     private readonly prisma: PrismaService,
@@ -159,6 +160,11 @@ export class StockFactService {
     this.devStaffAccess =
       config.get<string>('NODE_ENV') !== 'production' &&
       config.get<boolean>('DEV_STAFF_AUTH_ENABLED') === true;
+    this.prodStaffPrincipalId =
+      config.get<string>('NODE_ENV') === 'production' &&
+      config.get<boolean>('PROD_STAFF_AUTH_ENABLED') === true
+        ? config.get<string>('PROD_STAFF_PRINCIPAL_ID')
+        : undefined;
     this.sourceCode =
       config.get<string>('STOCK_FACT_SOURCE_CODE') ||
       (this.devStaffAccess ? 'dev-staff-stock' : '');
@@ -207,7 +213,7 @@ export class StockFactService {
     input: FactInput,
     kind: 'physical_absence' | 'store_sale',
   ): Promise<StockFactResult> {
-    if (!SOURCE_CODE_PATTERN.test(this.sourceCode) || this.hook === undefined) {
+    if (this.hook === undefined) {
       throw new ServiceUnavailableException({
         code: 'CONFIGURATION_UNAVAILABLE',
         message_key: 'errors.configuration_unavailable',
@@ -228,16 +234,26 @@ export class StockFactService {
           where: { id: input.actorId },
           select: { enabled: true, kind: true, permissions: true },
         });
+        const prodStaffAccess =
+          actor?.kind === 'staff' && input.actorId === this.prodStaffPrincipalId;
         if (
           !actor ||
           !actor.enabled ||
           !(
             (actor.kind === 'service' &&
               actor.permissions.includes('stock_fact_write')) ||
-            (actor.kind === 'staff' && this.devStaffAccess)
+            (actor.kind === 'staff' && (this.devStaffAccess || prodStaffAccess))
           )
         ) {
           throw new ForbiddenException();
+        }
+        const sourceCode =
+          this.sourceCode || (prodStaffAccess ? 'prod-staff-stock' : '');
+        if (!SOURCE_CODE_PATTERN.test(sourceCode)) {
+          throw new ServiceUnavailableException({
+            code: 'CONFIGURATION_UNAVAILABLE',
+            message_key: 'errors.configuration_unavailable',
+          });
         }
 
         const sourceFacts =
@@ -259,7 +275,7 @@ export class StockFactService {
                 currency: input.currency,
                 seller_provenance: input.sellerProvenance ?? null,
               };
-        const sourceScope = `stock-fact-source:${this.sourceCode}:${input.stockItemId}`;
+        const sourceScope = `stock-fact-source:${sourceCode}:${input.stockItemId}`;
         const actorScope = `stock-fact:${kind}:${input.actorId}:${input.stockItemId}`;
         const actorReplay = await this.transactions.executeIdempotentAction(
           transaction,
@@ -289,6 +305,7 @@ export class StockFactService {
                       input,
                       identity.productId,
                       kind,
+                      sourceCode,
                     ),
                   ),
                 }),
@@ -336,6 +353,7 @@ export class StockFactService {
     input: FactInput,
     expectedProductId: string,
     kind: 'physical_absence' | 'store_sale',
+    sourceCode: string,
   ): Promise<StockFactResult> {
     await this.transactions.lockSettings(transaction);
     const lockedProducts = await this.transactions.lockProducts(transaction, [
@@ -400,6 +418,7 @@ export class StockFactService {
     const eventId = randomUUID();
     const sourceEventId = input.sourceEventId;
     const eventKey = `stock-fact:${this.hashSourceEvent(
+      sourceCode,
       `${kind}:${stock.id}:${sourceEventId}`,
     )}`;
 
@@ -419,7 +438,7 @@ export class StockFactService {
           currency: sale.currency,
           recordedById: sale.actorId,
           sellerProvenance: sale.sellerProvenance ?? null,
-          sourceCode: this.sourceCode,
+          sourceCode,
           sourceEventId,
         },
       });
@@ -452,13 +471,13 @@ export class StockFactService {
     const auditPayload: Prisma.InputJsonObject =
       'evidenceRef' in input
         ? {
-            source_code: this.sourceCode,
+            source_code: sourceCode,
             source_event_id: sourceEventId,
             evidence_ref: input.evidenceRef,
             expected_version: input.expectedVersion,
           }
         : {
-            source_code: this.sourceCode,
+            source_code: sourceCode,
             source_event_id: sourceEventId,
             document_ref: input.documentRef,
             store_code: input.storeCode,
@@ -541,9 +560,9 @@ export class StockFactService {
     };
   }
 
-  private hashSourceEvent(sourceEventId: string): string {
+  private hashSourceEvent(sourceCode: string, sourceEventId: string): string {
     return createHash('sha256')
-      .update(`${this.sourceCode}\u0000${sourceEventId}`)
+      .update(`${sourceCode}\u0000${sourceEventId}`)
       .digest('hex');
   }
 }

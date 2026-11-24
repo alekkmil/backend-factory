@@ -16,12 +16,7 @@ export class InventoryModule {
     return {
       module: InventoryModule,
       imports: [PrismaModule, TransactionModule, StockFactModule],
-      controllers: [
-        InventoryController,
-        ...(process.env.NODE_ENV === 'production'
-          ? []
-          : [StockAdapterController]),
-      ],
+      controllers: [InventoryController, StockAdapterController],
       providers: [InventoryService, StaffTokenGuard],
     };
   }
