@@ -7,6 +7,7 @@ import { Prisma } from '../../../generated/prisma/client';
 import type { Locale } from '../../../generated/prisma/enums';
 import { PrismaService } from '../../database/prisma.service';
 import { isGenuineBarcode } from '../../common/stock-facts/barcode';
+import { productPath } from '../../common/publication/product-path';
 import { parseSpecifications, specificationDictionary } from '../../common/jewellery-specifications';
 import type {
   AdminCatalogueList, AdminProduct, CatalogueFieldError, CatalogueListQueryDto, ProductDraft,
@@ -243,7 +244,7 @@ export class CatalogueAdminService {
       const errors: CatalogueFieldError[] = [];
       const draft = revision ? this.draft(product.productType, revision) : null;
       const currentTexts = product.currentRevisionIdRelation?.from_ProductTranslation_revisionId;
-      const slug = {
+      const titleSlugs = {
         bg: catalogueSlugPreview(
           draft ? draft.name_bg : currentTexts?.find((text) => text.locale === 'bg')?.name ?? null, 'bg',
         ),
@@ -251,7 +252,11 @@ export class CatalogueAdminService {
           draft ? draft.name_en : currentTexts?.find((text) => text.locale === 'en')?.name ?? null, 'en',
         ),
       };
-      if (revision && draft) this.validateDraft(product.id, draft, revision, slug, errors);
+      const slug = {
+        bg: titleSlugs.bg ? productPath(titleSlugs.bg, product.productType, 'bg', product.ssgId) : null,
+        en: titleSlugs.en ? productPath(titleSlugs.en, product.productType, 'en', product.ssgId) : null,
+      };
+      if (revision && draft) this.validateDraft(product.id, draft, revision, titleSlugs, errors);
       if (draft?.specifications) {
         try {
           await specificationDictionary(transaction, [draft.specifications]);

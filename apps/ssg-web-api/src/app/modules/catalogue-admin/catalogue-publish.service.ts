@@ -12,6 +12,7 @@ import { CataloguePublishDto } from './catalogue-admin.dto';
 import { PrismaService } from '../../database/prisma.service';
 import { MediaStorageService } from '../../common/media-storage.service';
 import { MEDIA_SELECT, verifyCatalogueMedia } from './catalogue-media-verification';
+import { productPath } from '../../common/publication/product-path';
 
 @Injectable()
 export class CataloguePublishService {
@@ -143,11 +144,9 @@ export class CataloguePublishService {
             const text = revision.from_ProductTranslation_revisionId.find((row) => row.locale === locale);
             const slug = catalogueSlugPreview(text?.name ?? null, locale);
             if (!text || !slug) throw new BadRequestException();
-            const path = product.productType === 'jewellery'
-              ? `${locale === 'bg' ? '/бижута' : '/en/jewelry'}/${slug}-${product.publicUrlId}`
-              : `${locale === 'bg' ? '/скъпоценни-камъни' : '/en/gemstones'}/${slug}-${product.publicUrlId}`;
+            const path = productPath(slug, product.productType, locale, product.ssgId);
             const owner = await transaction.publicRoute.findUnique({ where: { path } });
-            if (owner && (owner.productId !== id || owner.locale !== locale || owner.state !== 'current')) {
+            if (owner && (owner.productId !== id || owner.locale !== locale || owner.state === 'gone')) {
               this.conflict('ROUTE_CONFLICT');
             }
             const old = oldTranslations.find((row) => row.locale === locale);
@@ -173,6 +172,10 @@ export class CataloguePublishService {
             if (!owner) {
               await transaction.publicRoute.create({
                 data: { path, locale, productId: id, state: 'current', changedAt: now },
+              });
+            } else if (owner.state === 'redirect') {
+              await transaction.publicRoute.update({
+                where: { id: owner.id }, data: { state: 'current', changedAt: now },
               });
             }
           }
