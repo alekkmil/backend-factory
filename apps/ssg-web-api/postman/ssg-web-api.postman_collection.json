@@ -295,7 +295,7 @@
             "method": "GET",
             "header": [],
             "url": "{{baseUrl}}/api/checkout/offices?locale={{locale}}&localityId={{econtCityId}}",
-            "description": "Choose an entry, show its localized name/address, and copy code to econtOfficeCode. Presence in the current city-specific provider list is the agreed selectable rule, not independently verified active status."
+            "description": "Choose an entry, show its localized name/address, and copy code to econtOfficeCode. locationType is staffed_office, drop_box or unknown (including mobile, drive-through, missing or inconsistent provider flags); it does not change eligibility. Presence in the current city-specific provider list is the agreed selectable rule, not independently verified active status."
           },
           "response": []
         },
@@ -690,7 +690,7 @@
                 }
               ]
             },
-            "description": "Resolves a current product route or redirects a previous route. Requires a matching published route and PUBLIC_SITE_ORIGIN configuration; unknown routes return 404."
+            "description": "Resolves a current product route or returns HTTP 301 with Location and the current canonical URL for a previous numeric or title route. Requires a matching published route and PUBLIC_SITE_ORIGIN configuration; unknown routes return 404."
           },
           "response": []
         },
@@ -874,7 +874,7 @@
               { "key": "X-CSRF-Token", "value": "{{devStaffCsrfToken}}", "type": "text" }
             ],
             "url": "{{baseUrl}}/api/admin/catalogue/{{productId}}",
-            "description": "Requires the configured development staff token pair and allowed Origin; no database permission grant. Returns AdminProduct: draft and matching draft_revision_id (both nullable), published_revision_id, slug_preview, verified units, deduplicated staged_unit_count and actionable validation_errors. No query parameters. Does not create drafts, publish, activate media or promote staged units. Validation errors are read-time checks, not a successful byte-verified publication preflight. Missing UUID returns 404; malformed UUID/unknown query returns 400."
+            "description": "Requires the configured staff token pair; no database permission grant. Returns AdminProduct: draft and matching draft_revision_id (both nullable), published_revision_id, slug_preview with full BG/EN relative paths ending in the existing ssg_id, verified units, deduplicated staged_unit_count and actionable validation_errors. No query parameters. Does not create drafts, publish, activate media or promote staged units. Validation errors are read-time checks, not a successful byte-verified publication preflight. Missing UUID returns 404; malformed UUID/unknown query returns 400."
           },
           "response": []
         }

@@ -203,8 +203,11 @@ For Econt office delivery:
    once and filter locally.
 2. Select a locality, clear any previous office, and call
    `GET /api/checkout/offices?localityId=<id>&locale=bg|en`. This returns
-   `{offices:[{id,code,name,address,locality,cityId}]}`; display `name` and
-   `address`. Require a selected office before proceeding.
+   `{offices:[{id,code,name,address,locality,cityId,locationType}]}`; display
+   `name` and `address`. `locationType` is `staffed_office`, `drop_box` or
+   `unknown`. It uses Econt's `isAPS`, `isMPS` and `isDrive` flags; mobile,
+   drive-through, missing or inconsistent flags return `unknown`. The type
+   does not change delivery eligibility. Require a selected office before proceeding.
 3. Submit the locality `id` as `receiving.cityId` and office `code` as
    `receiving.officeCode`. The quote snapshots the provider's localized
    locality, office name and address, plus the stable IDs. Order commitment
@@ -1551,6 +1554,14 @@ staged-unit count and actionable draft validation errors. Unknown UUIDs return
 units, approve media or publish products. Read-time media checks inspect stored
 metadata; they do not replace byte verification at publication.
 
+`slug_preview.bg` and `slug_preview.en` are the proposed full relative product
+paths, using the draft title when present and otherwise the published title.
+Each ends in the product's unchanged, case-preserved `ssg_id`. Catalogue and
+product detail responses return the current absolute URLs. After the route
+migration, `GET /api/products/resolve` returns a 301 and the current canonical
+URL for previously published numeric paths and older title paths. The frontend
+must use that location for its own permanent redirect.
+
 Both endpoints require the configured development staff tokens and a live enabled staff Principal
 and return `Cache-Control: private, no-store`. Public product endpoints continue
 to exclude drafts. No public origin/CDN configuration is needed to read drafts.
@@ -1577,6 +1588,14 @@ draft. Import/commit never publishes automatically. Enable it with
 checks metadata only. Production publication reads and decodes each selected
 S3 WebP derivative, checking its length, dimensions and SHA-256 against the
 draft metadata before committing the exact verified revision.
+
+The SSG product-path migration changes existing routes before the new release
+is activated. Pause catalogue publication during deployment and verify the
+release afterwards: rolling the application back does not reverse migrations,
+and older code can publish numeric routes again. The migration stops on missing
+published route data or route conflicts rather than discarding history. It does
+not invalidate frontend caches; refresh cached product URLs and sitemap data
+after deployment.
 
 The endpoint uses the configured staff authentication and CSRF checks.
 
