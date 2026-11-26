@@ -7,6 +7,7 @@ import {
   ServiceUnavailableException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { modelPriceAmount } from '../../common/model-price.dto';
 import { plainToInstance } from 'class-transformer';
 import { createHash, randomUUID } from 'node:crypto';
 import { validateSync } from 'class-validator';
@@ -524,6 +525,7 @@ export class CatalogueImportCommitService {
     const revisionDefaultsSelect = {
       id: true,
       specifications: true,
+      modelPrice: true,
       revisionNumber: true,
       jewelleryTypeId: true,
       salesMode: true,
@@ -569,9 +571,19 @@ export class CatalogueImportCommitService {
         ? response.code : 'SPECIFICATIONS_INVALID';
       throw new CommitFailure('specifications', code, 'errors.validation');
     }
+    let modelPrice: string | null;
+    try {
+      modelPrice = input.model_price === undefined
+        ? baseRevision?.modelPrice?.toFixed(2) ?? null : modelPriceAmount(input.model_price);
+    } catch (error) {
+      if (!(error instanceof BadRequestException)) throw error;
+      throw new CommitFailure('model_price', 'MODEL_PRICE_INVALID');
+    }
     const salesMode = hasBarcode
       ? parseSalesMode(input.requested_sales_mode ?? baseRevision?.salesMode)
-      : 'archive_catalogue';
+      : modelPrice !== null &&
+          (input.requested_sales_mode ?? baseRevision?.salesMode) !== 'archive_catalogue'
+        ? 'enquiry_only' : 'archive_catalogue';
     const priceVisibility =
       salesMode === 'archive_catalogue'
         ? 'hidden'
@@ -579,7 +591,7 @@ export class CatalogueImportCommitService {
             input.requested_price_visibility ??
               baseRevision?.priceVisibility,
           );
-    const restrictionReason: RestrictionReason | null = hasBarcode
+    const restrictionReason: RestrictionReason | null = hasBarcode || salesMode !== 'archive_catalogue'
       ? input.change_reason_code === undefined
         ? baseRevision?.changeReason ?? null
         : parseRestrictionReason(input.change_reason_code)
@@ -602,6 +614,7 @@ export class CatalogueImportCommitService {
         });
 
     const revisionData = {
+      modelPrice,
       specifications,
       jewelleryTypeId:
         input.jewellery_type === undefined
@@ -627,11 +640,7 @@ export class CatalogueImportCommitService {
         input.pickup_location_codes === undefined
           ? baseRevision?.pickupLocationCodes ?? []
           : parseLocationCodes(input.pickup_location_codes),
-      changeReason: hasBarcode
-        ? input.change_reason_code === undefined
-          ? baseRevision?.changeReason ?? null
-          : restrictionReason
-        : 'data_check',
+      changeReason: restrictionReason,
       changeNote:
         input.change_reason_note === undefined
           ? baseRevision?.changeNote ?? null

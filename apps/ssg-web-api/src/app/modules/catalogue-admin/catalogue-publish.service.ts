@@ -250,7 +250,7 @@ export class CataloguePublishService {
 
   private async changedRevision(transaction: Prisma.TransactionClient, oldId: string, newId: string): Promise<boolean> {
     const select = {
-      jewelleryTypeId: true, materialsState: true, gemstonesState: true, specifications: true,
+      jewelleryTypeId: true, materialsState: true, gemstonesState: true, specifications: true, modelPrice: true,
       salesMode: true, priceVisibility: true, fulfilmentMethods: true,
       deliveryScope: true, deliveryLocalityIds: true, pickupLocationCodes: true,
       mediaReleaseId: true,
@@ -267,7 +267,11 @@ export class CataloguePublishService {
     } satisfies Prisma.ProductRevisionSelect;
     const before = await transaction.productRevision.findUniqueOrThrow({ where: { id: oldId }, select });
     const after = await transaction.productRevision.findUniqueOrThrow({ where: { id: newId }, select });
-    return hashIdempotencyPayload(before) !== hashIdempotencyPayload(after);
+    return hashIdempotencyPayload({
+      ...before, modelPrice: before.modelPrice?.toFixed(2) ?? null,
+    }) !== hashIdempotencyPayload({
+      ...after, modelPrice: after.modelPrice?.toFixed(2) ?? null,
+    });
   }
 
   private conflict(code = 'VERSION_CONFLICT'): never {

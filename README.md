@@ -996,9 +996,15 @@ Editorial upload is multipart form data, gated by staff authentication and
 named `metadata` containing `{"request_id":"<UUID>","images":[...]}` and one
 file part named `image_<client_key>` per image. Each image entry has
 `client_key`, localized `alt_bg`/`alt_en`, and `processed_with_ai`. Upload
-between one and five JPEG/PNG/WebP images, each at most 10 MiB and with a
-minimum 1600-pixel long edge. The API strips source metadata, generates
-aspect-preserving WebP variants at 200/400/800/1600 pixels, stores the original
+between one and five single-frame JPEG/PNG/WebP images, each at most 10 MiB.
+Website images, including archival originals, have no 1600-pixel minimum.
+The API strips source metadata and generates aspect-preserving WebP variants
+bounded by 200/400/800/1600 pixels, without enlargement or padding. For a
+400 x 300 original, the 800 and 1600 slots remain 400 x 300; response width
+and height report actual dimensions. This does not relax catalogue jewellery
+image requirements. Invalid website images return `INVALID_IMAGE` with
+`details.client_key` and `details.rule` identifying decoding, format,
+multi-frame, dimension or processing failures. The API stores the original
 privately, and returns an approved `media.id` plus BG/EN public variants.
 Publishing the media makes the assets usable, but does not publish a page or
 store; reference the returned UUID in a published content section or store.
@@ -1316,6 +1322,35 @@ Each provider requires `id`, `category` (`analytics`/`marketing`), `name`,
 configuring cookies. These writes do not invent consent choices or policy text.
 
 ### Catalogue draft editing, visibility and reviewed-media registration
+
+#### Model display price without inventory
+
+Draft save and product import accept optional
+`model_price: {"amount":"230.00","currency":"EUR"}`. Use a positive fixed-point
+decimal with exactly two fractional digits; binary floating-point prices are
+not accepted. Omit the field to retain the previous value, or send null to
+clear it. The price belongs to the revision and becomes public only after
+explicit publication. Existing models are not assigned inferred prices.
+
+For a model without stock units, use `sales_mode: "enquiry_only"` and
+`price_visibility: "visible"` (import: `requested_sales_mode` and
+`requested_price_visibility`). Import never enables direct purchase for a
+model without barcodes. Archived models remain hidden-price unless explicitly
+changed; draft/publication archive-exit confirmation requirements still apply.
+The public `commercial_result.display_price` uses the approved model EUR
+price only when there are no stock records. It never substitutes for a
+missing/sold/unavailable unit price and never enables quote, order, reservation
+or payment eligibility. Hidden-price and archive catalogue behavior is unchanged.
+Price sorting/filtering includes these enquiry-only models; fulfilment filters
+still require real eligible units.
+
+The fineness-applicability migration fixes commit-time matching against
+namespaced dictionary values such as `material.platinum`. It preserves grades,
+dictionary identities and existing products. Previously failed imports need
+review and retry after deployment; they are not automatically committed.
+Rows already marked `invalid` cannot be committed again: preflight only the
+failed/uncreated models with new request IDs, review the new report, then
+commit that new batch. Do not resubmit successfully committed models.
 
 | Operation | Endpoint |
 | --- | --- |

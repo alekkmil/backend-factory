@@ -378,6 +378,7 @@ model ProductRevision {
   specifications                     Json?
   salesMode                          SalesMode            @default(enquiry_only)
   priceVisibility                    PriceVisibility      @default(hidden)
+  modelPrice                         Decimal?             @db.Decimal(12, 2)
   fulfilmentMethods                  FulfilmentMethod[]   @default([])
   deliveryScope                      DeliveryScope?
   deliveryLocalityIds                String[]             @default([])
