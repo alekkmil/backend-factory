@@ -29,6 +29,7 @@ export interface CommercialProductInput {
   jewelleryTypeCode: string | null;
   salesMode: SalesMode;
   priceVisibility: PriceVisibility;
+  modelPrice?: DecimalInput;
   fulfilmentMethods: FulfilmentMethod[];
   deliveryScope: DeliveryScope | null;
   deliveryLocalityIds: string[];
@@ -300,6 +301,12 @@ export class CommercialEvaluator {
 
     const availableUnits = units.filter((unit) => unit.status === 'available');
     if (availableUnits.length === 0) {
+      const modelPrice = parsePrice(product.modelPrice ?? null);
+      if (units.length === 0 && product.priceVisibility === 'visible' && modelPrice) {
+        return this.enquiry('product.enquiry', {
+          amount: modelPrice.amount, currency: 'EUR', is_from: false,
+        });
+      }
       return this.enquiry('product.unavailable_for_purchase');
     }
 

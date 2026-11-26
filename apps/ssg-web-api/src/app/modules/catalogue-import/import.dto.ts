@@ -1,4 +1,5 @@
 import { Type } from 'class-transformer';
+import { ModelPriceDto } from '../../common/model-price.dto';
 import { JewellerySpecificationsDto } from '../../common/jewellery-specifications';
 import {
   ArrayMaxSize,
@@ -20,6 +21,11 @@ import {
 } from 'class-validator';
 
 class ImportProductFieldsDto {
+  @ValidateIf((_, value: unknown) => value !== undefined && value !== null)
+  @IsDefined()
+  @ValidateNested()
+  @Type(() => ModelPriceDto)
+  model_price?: ModelPriceDto | null;
   @ValidateIf((_, value: unknown) => value !== undefined && value !== null)
   @ValidateNested()
   @Type(() => JewellerySpecificationsDto)

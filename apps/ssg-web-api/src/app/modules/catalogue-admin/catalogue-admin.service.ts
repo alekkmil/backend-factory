@@ -21,6 +21,7 @@ const TRANSLATIONS_SELECT = {
   seoTitle: true, seoDescription: true, ogImageId: true,
 } satisfies Prisma.ProductTranslationSelect;
 const REVISION_SELECT = {
+  modelPrice: true,
   specifications: true,
   id: true, state: true, jewelleryTypeIdRelation: { select: DICTIONARY_SELECT },
   materialsState: true, gemstonesState: true, salesMode: true, priceVisibility: true,
@@ -86,6 +87,7 @@ export async function cloneProductRevisionToDraft(
       gemstonesState: source.gemstonesState,
       salesMode: source.salesMode,
       priceVisibility: source.priceVisibility,
+      modelPrice: source.modelPrice,
       fulfilmentMethods: source.fulfilmentMethods,
       deliveryScope: source.deliveryScope,
       deliveryLocalityIds: source.deliveryLocalityIds,
@@ -309,6 +311,9 @@ export class CatalogueAdminService {
       gemstones_state: revision.gemstonesState,
       gemstone_codes: revision.from_RevisionGemstone_revisionId.map((stone) => stone.gemstoneIdRelation.code),
       sales_mode: revision.salesMode, price_visibility: revision.priceVisibility,
+      model_price: revision.modelPrice === null ? null : {
+        amount: revision.modelPrice.toFixed(2), currency: 'EUR',
+      },
       fulfilment_methods: revision.fulfilmentMethods, delivery_scope: revision.deliveryScope,
       delivery_locality_ids: revision.deliveryLocalityIds, pickup_location_codes: revision.pickupLocationCodes,
       media_release_id: revision.mediaReleaseId,

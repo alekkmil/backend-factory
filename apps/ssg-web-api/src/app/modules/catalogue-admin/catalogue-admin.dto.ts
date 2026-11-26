@@ -1,4 +1,5 @@
 import { Transform, Type } from 'class-transformer';
+import { ModelPriceDto } from '../../common/model-price.dto';
 import {
   ArrayMaxSize, ArrayMinSize, Equals, IsArray, IsDefined, IsIn, IsInt, IsString,
   IsUUID, Matches, Max, MaxLength, Min, ValidateIf, ValidateNested,
@@ -97,6 +98,11 @@ export class ProductSeoTranslationDto {
 }
 
 export class ProductDraftInputDto {
+  @ValidateIf((_, value: unknown) => value !== undefined && value !== null)
+  @IsDefined()
+  @ValidateNested()
+  @Type(() => ModelPriceDto)
+  model_price?: ModelPriceDto | null;
   @ValidateIf((_, value: unknown) => value !== undefined)
   @IsArray()
   @ArrayMinSize(2)
@@ -274,6 +280,7 @@ export interface AdminCatalogueList {
 }
 
 export interface ProductDraft {
+  model_price?: ModelPriceDto | null;
   seo_translations?: ProductSeoTranslationDto[];
   specifications?: JewellerySpecificationsDto | null;
   product_type: ProductType;
