@@ -7,6 +7,7 @@ import {
   ServiceUnavailableException,
 } from '@nestjs/common';
 import { Prisma } from '../../../generated/prisma/client';
+import { modelPriceAmount } from '../../common/model-price.dto';
 import type { RestrictionReason } from '../../../generated/prisma/enums';
 import { TransactionService } from '../../common/transactions/transaction.service';
 import type { AdminProduct, ProductDraft } from './catalogue-admin.dto';
@@ -33,7 +34,13 @@ function normalizedText(value: string | null, maximum: number): string | null {
 }
 
 function normalizeDraft(input: CatalogueSaveDraftDto['draft']): NormalizedDraft {
+  if (input.model_price != null) modelPriceAmount(input.model_price);
   const draft: NormalizedDraft = {
+    ...(input.model_price === undefined ? {} : {
+      model_price: input.model_price === null ? null : {
+        amount: input.model_price.amount, currency: 'EUR',
+      },
+    }),
     ...(input.seo_translations === undefined ? {} : {
       seo_translations: input.seo_translations.map((text) => ({
         locale: text.locale,
@@ -217,6 +224,9 @@ export class CatalogueDraftService {
                 createdById: actorId,
                 salesMode: draft.sales_mode,
                 priceVisibility: draft.price_visibility,
+                ...(draft.model_price === undefined ? {} : {
+                  modelPrice: modelPriceAmount(draft.model_price),
+                }),
               },
               select: { id: true },
             });
@@ -245,6 +255,9 @@ export class CatalogueDraftService {
               gemstonesState: draft.gemstones_state,
               salesMode: draft.sales_mode,
               priceVisibility: draft.price_visibility,
+              ...(draft.model_price === undefined ? {} : {
+                modelPrice: modelPriceAmount(draft.model_price),
+              }),
               fulfilmentMethods: draft.fulfilment_methods,
               deliveryScope: draft.delivery_scope,
               deliveryLocalityIds: draft.delivery_locality_ids,

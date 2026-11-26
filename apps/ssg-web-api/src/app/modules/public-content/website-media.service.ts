@@ -288,6 +288,7 @@ export class WebsiteMediaService {
       throw new BadRequestException({
         code: 'INVALID_IMAGE',
         message_key: 'errors.validation',
+        details: { client_key: input.client_key, rule: 'IMAGE_DECODE_FAILED' },
       });
     }
     if (
@@ -295,11 +296,17 @@ export class WebsiteMediaService {
       !info.height ||
       (info.pages ?? 1) !== 1 ||
       !['jpeg', 'png', 'webp'].includes(info.format ?? '') ||
-      Math.max(info.width, info.height) < 1600
+      Math.min(info.width, info.height) < 1
     ) {
       throw new BadRequestException({
         code: 'INVALID_IMAGE',
         message_key: 'errors.validation',
+        details: {
+          client_key: input.client_key,
+          rule: (info.pages ?? 1) !== 1 ? 'MULTIFRAME_NOT_SUPPORTED'
+            : !['jpeg', 'png', 'webp'].includes(info.format ?? '') ? 'FORMAT_UNSUPPORTED'
+              : 'IMAGE_DIMENSIONS_INVALID',
+        },
       });
     }
     const extension = info.format === 'jpeg' ? 'jpg' : info.format;
@@ -320,10 +327,11 @@ export class WebsiteMediaService {
         throw new BadRequestException({
           code: 'INVALID_IMAGE',
           message_key: 'errors.validation',
+          details: { client_key: input.client_key, rule: 'IMAGE_PROCESSING_FAILED' },
         });
       }
       if (
-        Math.max(output.info.width, output.info.height) !== size ||
+        Math.max(output.info.width, output.info.height) > size ||
         output.info.format !== 'webp'
       ) {
         throw new Error('Invalid generated website media derivative');

@@ -17,6 +17,7 @@ import { PrismaService } from '../../database/prisma.service';
 import { isGenuineBarcode } from '../../common/stock-facts/barcode';
 import { readDerivative } from '../products/product-read.service';
 import { parseSpecifications, specificationCodes } from '../../common/jewellery-specifications';
+import { modelPriceAmount } from '../../common/model-price.dto';
 import {
   ImportImageRowDto,
   ImportLegacyLinkRowDto,
@@ -117,6 +118,7 @@ const EXISTING_PRODUCT_SELECT = {
   currentRevisionIdRelation: {
     select: {
       specifications: true,
+      modelPrice: true,
       jewelleryTypeIdRelation: { select: { code: true } },
       materialsState: true,
       gemstonesState: true,
@@ -418,6 +420,14 @@ export class CatalogueImportService {
     const productRowsById = new Map<string, ImportProductRowDto[]>();
     data.products.forEach((product, index) => {
       const ssgId = value(product.ssg_id);
+      if (product.model_price != null) {
+        try {
+          modelPriceAmount(product.model_price);
+        } catch (error) {
+          if (!(error instanceof BadRequestException)) throw error;
+          addError('Products', index + 1, 'model_price', 'MODEL_PRICE_INVALID', ssgId);
+        }
+      }
       if (!isSsgId(ssgId)) {
         addError('Products', index + 1, 'ssg_id', 'INVALID_SSG_ID', ssgId);
       }
@@ -1715,9 +1725,15 @@ function buildDiff(
   const hasGenuineBarcode = group.units.some((unit) =>
     isGenuineBarcode(value(unit.barcode)),
   );
+  const hasModelPrice = input.model_price === undefined
+    ? existing?.currentRevisionIdRelation?.modelPrice != null
+    : input.model_price !== null;
+  const requestedSalesMode =
+    input.requested_sales_mode ?? existing?.currentRevisionIdRelation?.salesMode;
   const proposedSalesMode = hasGenuineBarcode
     ? input.requested_sales_mode ?? 'enquiry_only'
-    : 'archive_catalogue';
+    : hasModelPrice && requestedSalesMode !== 'archive_catalogue'
+      ? 'enquiry_only' : 'archive_catalogue';
   const proposedPriceVisibility =
     proposedSalesMode === 'archive_catalogue'
       ? 'hidden'
@@ -1742,6 +1758,7 @@ function buildDiff(
     ]) ?? [],
   );
   const actual: Record<string, unknown> = {
+    model_price: revision?.modelPrice ? { amount: revision.modelPrice.toFixed(2), currency: 'EUR' } : null,
     specifications: revision?.specifications ?? null,
     product_type: existing.productType,
     jewellery_type: revision?.jewelleryTypeIdRelation?.code ?? null,
@@ -1773,6 +1790,7 @@ function buildDiff(
         ) ?? [],
   };
   const desired: Record<string, unknown> = {
+    model_price: input.model_price,
     specifications: input.specifications,
     product_type: input.product_type,
     jewellery_type: input.jewellery_type,

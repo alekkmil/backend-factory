@@ -42,6 +42,7 @@ const PRODUCT_SELECT = {
       specifications: true,
       salesMode: true,
       priceVisibility: true,
+      modelPrice: true,
       fulfilmentMethods: true,
       deliveryScope: true,
       deliveryLocalityIds: true,
@@ -267,7 +268,7 @@ export function configurationUrl(
   return url;
 }
 
-export function readDerivative(value: Prisma.JsonValue): Derivative {
+export function readDerivative(value: Prisma.JsonValue, naturalSize = false): Derivative {
   if (
     !isJsonRecord(value) ||
     typeof value.size !== 'number' ||
@@ -290,7 +291,7 @@ export function readDerivative(value: Prisma.JsonValue): Derivative {
     value.width > value.size ||
     value.height < 1 ||
     value.height > value.size ||
-    Math.max(value.width, value.height) !== value.size ||
+    (!naturalSize && Math.max(value.width, value.height) !== value.size) ||
     value.mime !== 'image/webp' ||
     value.colour_space !== 'sRGB' ||
     value.bytes < 1 ||
@@ -345,7 +346,7 @@ export function projectMedia(
       message_key: 'errors.media_not_ready',
     });
   }
-  const derivatives = asset.derivatives.map((item) => readDerivative(item));
+  const derivatives = asset.derivatives.map((item) => readDerivative(item, asset.role === 'editorial'));
   const bySize = new Map(derivatives.map((item) => [item.size, item]));
   if (
     derivatives.length !== 4 ||
@@ -414,6 +415,7 @@ function commercialProduct(product: ProductRow): CommercialProductInput {
     jewelleryTypeCode: revision.jewelleryTypeIdRelation?.code ?? null,
     salesMode: revision.salesMode,
     priceVisibility: revision.priceVisibility,
+    modelPrice: revision.modelPrice,
     fulfilmentMethods: revision.fulfilmentMethods,
     deliveryScope: revision.deliveryScope,
     deliveryLocalityIds: revision.deliveryLocalityIds,

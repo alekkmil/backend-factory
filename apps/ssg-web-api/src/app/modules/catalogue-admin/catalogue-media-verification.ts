@@ -23,7 +23,7 @@ export async function verifyCatalogueMedia(
     }
     let entries: ReturnType<typeof readDerivative>[];
     try {
-      entries = value.map(readDerivative);
+      entries = value.map((entry) => readDerivative(entry));
     } catch (error) {
       if (!(error instanceof ServiceUnavailableException)) throw error;
       throw new ConflictException({ code: 'MEDIA_NOT_READY', message_key: 'errors.media_not_ready' });

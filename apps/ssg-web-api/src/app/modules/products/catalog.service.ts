@@ -279,6 +279,14 @@ export class CatalogService {
       if (!hasUnitFilter) {
         return true;
       }
+      if (candidate.units.length === 0) {
+        if (query.fulfilment_method || context !== null) return false;
+        const price = candidate.summary.commercial_result.display_price;
+        if (!price) return false;
+        const amount = new Prisma.Decimal(price.amount);
+        return (minimum === null || amount.greaterThanOrEqualTo(minimum)) &&
+          (maximum === null || amount.lessThanOrEqualTo(maximum));
+      }
       if (!candidate.settings) {
         throw new ServiceUnavailableException({
           code: 'CONFIGURATION_UNAVAILABLE',

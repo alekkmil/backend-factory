@@ -148,6 +148,7 @@ export class StockPublicationService {
           state: 'draft',
           ...(source && {
             jewelleryTypeId: source.jewelleryTypeId,
+            modelPrice: source.modelPrice,
             materialsState: source.materialsState,
             gemstonesState: source.gemstonesState,
             fulfilmentMethods: source.fulfilmentMethods,
