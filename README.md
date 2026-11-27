@@ -81,7 +81,12 @@ for enquiries and staff payment notifications. Set `MAIL_TO` to a
 comma-separated list of staff addresses; duplicates are removed
 case-insensitively. Each verified payment queues a separate staff email per
 address, without a customer order-access link. Existing already-queued payments
-are not backfilled.
+are not backfilled. The Bulgarian staff email includes purchased unit barcodes,
+model codes, customer contact and receiving details. New orders snapshot the
+staff product data at commitment; older orders use labelled current catalogue
+and stock data when snapshots are missing. Checkout does not currently collect
+selected sizes, invoice details, postal codes or separate delivery notes.
+Treat staff emails and any local captures as sensitive customer information.
 
 Customer payment confirmations, order-access links, and other customer order
 emails use `PURCHASE_SMTP_HOST`, `PURCHASE_SMTP_PORT`, `PURCHASE_SMTP_SECURE`,
@@ -94,6 +99,10 @@ Reply-To as `office@ssg.bg`. Both From and the SMTP envelope sender use
 environment. Never guess or repeatedly test credentials: this provider blocks
 IPs after three failed logins in seven days. The outbox retries failed sends,
 so disable the worker and resolve authentication failures promptly.
+Verified-payment confirmations include the purchased product images from the
+order snapshot when their URLs match the configured media CDN. They still
+include the order details when an image is unavailable or blocked by the
+recipient's email client.
 
 Production checkout requires both SMTP configurations, `MAIL_TO`, and the
 outbox worker. Customer order SMTP does not fall back to standard SMTP if the
@@ -226,7 +235,7 @@ For Econt office delivery:
    does not change delivery eligibility. Require a selected office before proceeding.
 3. Submit the locality `id` as `receiving.cityId` and office `code` as
    `receiving.officeCode`. The quote snapshots the provider's localized
-   locality, office name and address, plus the stable IDs. Order commitment
+   locality, office name, address and location type, plus the stable IDs. Order commitment
    checks the same immutable snapshot against Econt again. If the selection
    disappears, moves or its details change, recreate the quote.
 

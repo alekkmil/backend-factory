@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger, ServiceUnavailableException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { isEmail, isUUID } from 'class-validator';
 import { Prisma } from '../../../generated/prisma/client';
@@ -12,6 +12,8 @@ import type { ClaimedOutboxMessage } from './outbox.service';
 import { OutboxService } from './outbox.service';
 import { decryptOrderAccessSecret, hashOrderAccessToken } from './order-access-secret';
 import { enqueueCheckoutOrderMail } from './checkout-order-mail';
+import { configurationUrl } from '../../modules/products/product-read.service';
+import { renderCheckoutPaymentHtml } from './checkout-payment-mail-template';
 
 function object(value: Prisma.JsonValue | null): Prisma.JsonObject {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) {
@@ -28,6 +30,8 @@ function escapeHtml(value: string): string {
 
 @Injectable()
 export class CheckoutOrderNotificationService {
+  private readonly logger = new Logger(CheckoutOrderNotificationService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly transactions: TransactionService,
@@ -164,6 +168,7 @@ export class CheckoutOrderNotificationService {
       let subject: string;
       let before: string;
       let after: string;
+      let paymentHtml: string | undefined;
       if (payment) {
         const store = await this.prisma.store.findUnique({
           where: { code: 'sofia' }, select: { publicData: true },
@@ -179,12 +184,17 @@ export class CheckoutOrderNotificationService {
           typeof storeEmail !== 'string' || !isEmail(storeEmail) ||
           typeof storeData.phone !== 'string' || !storeData.phone
         ) throw new OutboxDispatchError('BOUTIQUE_INFORMATION_UNAVAILABLE');
-        const lines = order.from_OrderLine_orderId.map((line) => {
+        const items = order.from_OrderLine_orderId.map((line) => {
           const item = object(line.snapshot);
           if (typeof item.title !== 'string') throw new OutboxDispatchError('CHECKOUT_SNAPSHOT_INVALID');
-          return `${item.title} — ${line.unitPrice.toFixed(2)} EUR`;
-        }).join('\n');
-        if (!lines) throw new OutboxDispatchError('CHECKOUT_SNAPSHOT_INVALID');
+          return {
+            title: item.title,
+            price: `${line.unitPrice.toFixed(2)} EUR`,
+            imageUrl: typeof item.imageUrl === 'string' ? item.imageUrl : undefined,
+          };
+        });
+        if (!items.length) throw new OutboxDispatchError('CHECKOUT_SNAPSHOT_INVALID');
+        const lines = items.map((item) => `${item.title} — ${item.price}`).join('\n');
         const receiving = object(order.fulfilment);
         const delivery = receiving.method === 'econt_address' || receiving.method === 'econt_office';
         const receive = delivery
@@ -198,15 +208,36 @@ export class CheckoutOrderNotificationService {
         const date = new Intl.DateTimeFormat(bg ? 'bg-BG' : 'en-GB', {
           timeZone: 'Europe/Sofia', dateStyle: 'medium', timeStyle: 'short',
         }).format(order.createdAt);
+        const receivingInstructions = bg
+          ? delivery
+            ? 'Екипът на бутика ще се свърже с вас на посочения телефон в работно време, за да уточни нужните детайли за доставката и да потвърди кога ще изпрати пратката.'
+            : `Екипът на бутика ще се свърже с вас на посочения телефон в работно време, за да уговори кога да вземете бижуто.\nБутик SSG София: ${localized.address}`
+          : delivery
+            ? 'Our boutique team will call you during opening hours to clarify any delivery details and confirm when your parcel will be dispatched.'
+            : `Our boutique team will call you during opening hours to arrange when you can collect your jewellery.\nSSG Sofia boutique: ${localized.address}`;
         subject = bg
           ? `Потвърждение за плащане — поръчка № ${order.number}`
           : `Payment confirmation — order no. ${order.number}`;
         before = bg
-          ? `Благодарим ви за поръчката.\n\nПолучихме плащането за поръчка № ${order.number} от ${date}.\n\n${lines}\n\nПлатена сума: ${order.total.toFixed(2)} EUR\nДоставка / получаване: 0,00 €\n\nПолучаване:\n${receive}\n\n${delivery ? 'Екипът на бутика ще се свърже с вас на посочения телефон в работно време, за да уточни нужните детайли за доставката и да потвърди кога ще изпрати пратката.' : `Екипът на бутика ще се свърже с вас на посочения телефон в работно време, за да уговори кога да вземете бижуто.\nБутик SSG София: ${localized.address}`}\n\nРаботно време: ${localized.opening_hours}\n\nВижте поръчката: `
-          : `Thank you for your order.\n\nWe have received payment for order no. ${order.number}, placed on ${date}.\n\n${lines}\n\nAmount paid: ${order.total.toFixed(2)} EUR\nDelivery / collection: €0.00\n\nReceiving:\n${receive}\n\n${delivery ? 'Our boutique team will call you during opening hours to clarify any delivery details and confirm when your parcel will be dispatched.' : `Our boutique team will call you during opening hours to arrange when you can collect your jewellery.\nSSG Sofia boutique: ${localized.address}`}\n\nOpening hours: ${localized.opening_hours}\n\nView your order: `;
+          ? `Благодарим ви за поръчката.\n\nПолучихме плащането за поръчка № ${order.number} от ${date}.\n\n${lines}\n\nПлатена сума: ${order.total.toFixed(2)} EUR\nДоставка / получаване: 0,00 €\n\nПолучаване:\n${receive}\n\n${receivingInstructions}\n\nРаботно време: ${localized.opening_hours}\n\nВижте поръчката: `
+          : `Thank you for your order.\n\nWe have received payment for order no. ${order.number}, placed on ${date}.\n\n${lines}\n\nAmount paid: ${order.total.toFixed(2)} EUR\nDelivery / collection: €0.00\n\nReceiving:\n${receive}\n\n${receivingInstructions}\n\nOpening hours: ${localized.opening_hours}\n\nView your order: `;
         after = bg
           ? `\n\nВъпроси? ${storeEmail} · ${storeData.phone}\nSSG · Sea of Silver & Gold`
           : `\n\nQuestions? ${storeEmail} · ${storeData.phone}\nSSG · Sea of Silver & Gold`;
+        let mediaOrigin: URL | null = null;
+        try {
+          mediaOrigin = configurationUrl(this.config, 'MEDIA_CDN_BASE_URL',
+            this.config.get<string>('NODE_ENV') === 'production');
+        } catch (error) {
+          if (!(error instanceof ServiceUnavailableException)) throw error;
+          this.logger.warn('Payment email image origin is unavailable; product images omitted');
+        }
+        paymentHtml = renderCheckoutPaymentHtml({
+          locale: message.locale, orderNumber: order.number, date, items,
+          total: `${order.total.toFixed(2)} EUR`, receiving: receive, receivingInstructions,
+          openingHours: localized.opening_hours, storeEmail, storePhone: storeData.phone,
+          accessUrl: link, mediaOrigin,
+        });
       } else {
         subject = bg
           ? `Връзка за преглед на поръчка № ${order.number}`
@@ -220,7 +251,7 @@ export class CheckoutOrderNotificationService {
       }
       const text = `${before}${link}${after}`;
       const linkLabel = bg ? 'Виж поръчката' : 'View order';
-      const html = `<div style="font-family:Arial,sans-serif;white-space:pre-wrap">${escapeHtml(before)}<a href="${escapeHtml(link)}" style="text-decoration:underline">${linkLabel}</a>${escapeHtml(after)}</div>`;
+      const html = paymentHtml ?? `<div style="font-family:Arial,sans-serif;white-space:pre-wrap">${escapeHtml(before)}<a href="${escapeHtml(link)}" style="text-decoration:underline">${linkLabel}</a>${escapeHtml(after)}</div>`;
       return {
         outcome: 'sent',
         providerMessageId: await this.mail.deliver(message.id, {

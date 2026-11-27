@@ -1,5 +1,6 @@
 import type { Locale } from '../../../generated/prisma/enums';
 import type { CapturedMail } from './local-mail-capture.service';
+import { trustedImageUrl } from './mail-image-url';
 
 export type EnquiryMailKind =
   | 'general'
@@ -103,26 +104,6 @@ function receivedDate(value: Date, locale: Locale): string {
 
 function actionButton(label: string, href: string): string {
   return `<a class="mail-action" href="${escapeHtml(href)}" style="display:inline-block;background:#755b3e;color:#fff;text-decoration:none;padding:12px 18px;border-radius:4px;margin:4px 8px 4px 0;font-size:16px">${escapeHtml(label)}</a>`;
-}
-
-function trustedImageUrl(
-  value: string | undefined,
-  origin: URL | null,
-): string | null {
-  if (!value || !origin) return null;
-  try {
-    const url = new URL(value);
-    if (
-      url.origin !== origin.origin ||
-      !url.pathname.startsWith(origin.pathname) ||
-      url.username ||
-      url.password
-    )
-      return null;
-    return url.toString();
-  } catch {
-    return null;
-  }
 }
 
 export function renderEnquiryMail(input: EnquiryMailInput): CapturedMail {

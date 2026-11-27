@@ -8,6 +8,8 @@ import { OutboxDispatcherService } from './outbox-dispatcher.service';
 import { OutboxService } from './outbox.service';
 import { OutboxWorkerService } from './outbox-worker.service';
 import { CheckoutOrderNotificationService } from './checkout-order-notification.service';
+import { StaffPaymentNotificationService } from './staff-payment-notification.service';
+import { EcontDirectoryService } from '../../modules/checkout/econt-directory.service';
 
 @Module({
   imports: [PrismaModule, TransactionModule],
@@ -19,6 +21,8 @@ import { CheckoutOrderNotificationService } from './checkout-order-notification.
     OutboxDispatcherService,
     OutboxWorkerService,
     CheckoutOrderNotificationService,
+    StaffPaymentNotificationService,
+    EcontDirectoryService,
   ],
   exports: [
     OutboxService,

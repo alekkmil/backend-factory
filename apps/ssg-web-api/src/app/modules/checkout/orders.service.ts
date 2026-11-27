@@ -2,6 +2,7 @@ import {
   BadRequestException,
   ConflictException,
   Injectable,
+  Logger,
   ServiceUnavailableException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
@@ -18,6 +19,7 @@ import type { CommitOrderDto } from './orders.dto';
 import { StockPublicationService } from '../../common/stock-facts/stock-publication.service';
 import { PAYMENT_HOLD_DURATION_MS } from './payment-hold';
 import { EcontDirectoryService, invalidEcontOffice } from './econt-directory.service';
+import { configurationUrl, routeUrl } from '../products/product-read.service';
 
 function snapshot(value: Prisma.JsonValue): Prisma.InputJsonObject {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) {
@@ -28,6 +30,8 @@ function snapshot(value: Prisma.JsonValue): Prisma.InputJsonObject {
 
 @Injectable()
 export class OrdersService {
+  private readonly logger = new Logger(OrdersService.name);
+
   constructor(
     private readonly config: ConfigService,
     private readonly transactions: TransactionService,
@@ -149,8 +153,27 @@ export class OrdersService {
             }
             const stocks = await transaction.stockItem.findMany({
               where: { id: { in: quote.from_QuoteLine_quoteId.map((line) => line.stockItemId) } },
-              select: { id: true, locationCode: true },
+              select: { id: true, locationCode: true, barcode: true },
             });
+            const products = await transaction.product.findMany({
+              where: { id: { in: productIds } },
+              select: {
+                id: true, ssgId: true,
+                currentRevisionIdRelation: {
+                  select: {
+                    from_ProductTranslation_revisionId: {
+                      where: { locale: 'bg' }, select: { name: true },
+                    },
+                  },
+                },
+              },
+            });
+            const bgRoutes = await transaction.publicRoute.findMany({
+              where: { productId: { in: productIds }, locale: 'bg', state: 'current' },
+              select: { productId: true, path: true },
+            });
+            const siteOrigin = configurationUrl(this.config, 'PUBLIC_SITE_ORIGIN',
+              this.config.get<string>('NODE_ENV') === 'production');
             for (const line of quote.from_QuoteLine_quoteId) {
               const reserved = await transaction.stockItem.updateMany({
                 where: {
@@ -190,6 +213,21 @@ export class OrdersService {
                   create: quote.from_QuoteLine_quoteId.map((line) => {
                     const stock = stocks.find((unit) => unit.id === line.stockItemId);
                     if (!stock) throw checkoutConflict('ITEM_UNAVAILABLE');
+                    const product = products.find((entry) => entry.id === line.productId);
+                    if (!product) throw checkoutConflict('ITEM_UNAVAILABLE');
+                    const nameBg = product.currentRevisionIdRelation?.from_ProductTranslation_revisionId[0]?.name;
+                    const matchingRoutes = bgRoutes.filter((route) => route.productId === line.productId);
+                    let productUrlBg: string | undefined;
+                    if (matchingRoutes.length === 1) {
+                      try {
+                        productUrlBg = routeUrl(matchingRoutes[0].path, siteOrigin);
+                      } catch (error) {
+                        if (!(error instanceof ServiceUnavailableException)) throw error;
+                      }
+                    }
+                    if (!nameBg || !productUrlBg) {
+                      this.logger.warn('Bulgarian staff product snapshot is incomplete; current data will be used if available');
+                    }
                     return {
                       stockItemId: line.stockItemId,
                       productId: line.productId,
@@ -197,6 +235,12 @@ export class OrdersService {
                       sortOrder: line.sortOrder,
                       unitPrice: line.unitPrice,
                       snapshot: snapshot(line.publicSnapshot),
+                      staffSnapshot: {
+                        barcodes: [stock.barcode],
+                        ssgId: product.ssgId,
+                        ...(nameBg ? { nameBg } : {}),
+                        ...(productUrlBg ? { productUrlBg } : {}),
+                      },
                       reservationReference: `${orderId}:${line.stockItemId}`,
                       reservedLocation: stock.locationCode,
                     };

@@ -9,12 +9,13 @@ import { configurationUrl } from '../../modules/products/product-read.service';
 import { MailDeliveryService, MailDeliveryError } from './mail-delivery.service';
 import { MailCaptureError } from './local-mail-capture.service';
 import { OrderNotificationService } from './order-notification.service';
-import { OutboxDispatchError, renderMail } from './outbox-handler';
+import { OutboxDispatchError } from './outbox-handler';
 import { renderEnquiryMail } from './enquiry-mail-template';
 import type { EnquiryMailContext, EnquiryMailKind } from './enquiry-mail-template';
 import type { OutboxDispatchResult, OutboxJobHandler } from './outbox-handler';
 import type { ClaimedOutboxMessage } from './outbox.service';
 import { CheckoutOrderNotificationService } from './checkout-order-notification.service';
+import { StaffPaymentNotificationService } from './staff-payment-notification.service';
 
 export { OutboxDispatchError } from './outbox-handler';
 export type { OutboxDispatchResult, OutboxJobHandler } from './outbox-handler';
@@ -72,6 +73,7 @@ export class OutboxDispatcherService {
     private readonly mailDelivery: MailDeliveryService,
     private readonly orderNotifications: OrderNotificationService,
     private readonly checkoutNotifications: CheckoutOrderNotificationService,
+    private readonly staffPayments: StaffPaymentNotificationService,
     private readonly config: ConfigService,
   ) {}
 
@@ -133,21 +135,7 @@ export class OutboxDispatcherService {
     if (message.dedupeKey !== `bank-payment-staff:${payload.payment_attempt_id}:${recipientHash}`) {
       throw new OutboxDispatchError('JOB_PAYLOAD_INVALID');
     }
-    const attempt = await this.prisma.bankPaymentAttempt.findUnique({
-      where: { id: payload.payment_attempt_id }, include: { order: true },
-    });
-    if (!attempt || attempt.orderId !== message.orderId || attempt.order.sandbox ||
-        attempt.outcome !== 'paid' || !attempt.paidAt) {
-      throw new OutboxDispatchError('CHECKOUT_SNAPSHOT_UNAVAILABLE');
-    }
-    const review = attempt.manualReviewRequired || !attempt.amount.equals(attempt.order.total) ||
-      attempt.currency !== attempt.order.currency;
-    const mail = renderMail(message.recipientSnapshot, `Verified payment — order ${attempt.order.number}`, [
-      ['Order', attempt.order.number],
-      ['Amount received', `${attempt.amount.toFixed(2)} ${attempt.currency}`],
-      ['Verified at', attempt.paidAt.toISOString()],
-      ['Manual payment review required', review ? 'Yes' : 'No'],
-    ]);
+    const mail = await this.staffPayments.render(payload.payment_attempt_id, message.orderId, message.recipientSnapshot);
     try {
       const prior = await this.mailDelivery.lookup(message.id, 'staff-payment');
       if (prior) return { outcome: 'sent', providerMessageId: prior };
