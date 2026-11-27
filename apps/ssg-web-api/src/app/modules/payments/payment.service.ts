@@ -3,13 +3,14 @@ import {
   ServiceUnavailableException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { createPrivateKey, randomBytes } from 'node:crypto';
+import { createHash, createPrivateKey, randomBytes } from 'node:crypto';
 import { isEmail } from 'class-validator';
 import { Prisma } from '../../../generated/prisma/client';
 import { PrismaService } from '../../database/prisma.service';
 import { hashIdempotencyPayload, TransactionService } from '../../common/transactions/transaction.service';
 import { OutboxService } from '../../common/outbox/outbox.service';
 import { enqueueCheckoutOrderMail } from '../../common/outbox/checkout-order-mail';
+import { parseMailRecipients } from '../../common/outbox/mail-recipients';
 import {
   CHECKOUT_QUOTE_INCLUDE, CheckoutValidationService, checkoutConflict,
 } from '../checkout/checkout-validation.service';
@@ -344,6 +345,20 @@ export class PaymentService {
         await enqueueCheckoutOrderMail(tx, this.outbox, this.config, {
           orderId: attempt.orderId, email: customer.email, locale: attempt.order.locale,
           kind: 'customer_payment_received', dedupeKey, paymentAttemptId: attempt.id,
+        });
+      }
+      const recipients = parseMailRecipients(this.config.get<string>('MAIL_TO') ?? '');
+      if (!recipients.length) throw new Error('Payment notification recipients are not configured');
+      for (const recipient of recipients) {
+        const recipientHash = createHash('sha256').update(recipient.toLowerCase()).digest('hex');
+        await this.outbox.enqueue(tx, {
+          dedupeKey: `bank-payment-staff:${attempt.id}:${recipientHash}`,
+          kind: 'ops_payment_received',
+          orderId: attempt.orderId,
+          recipientSnapshot: recipient,
+          locale: attempt.order.locale,
+          templateVersion: 'verified-payment-staff-v1',
+          payload: { order_id: attempt.orderId, payment_attempt_id: attempt.id },
         });
       }
       await tx.bankPaymentAttempt.update({

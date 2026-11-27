@@ -208,6 +208,7 @@ enum InquiryType {
 
 enum JobKind {
   ops_order_received
+  ops_payment_received
   customer_payment_received
   customer_order_confirmed
   customer_order_access
