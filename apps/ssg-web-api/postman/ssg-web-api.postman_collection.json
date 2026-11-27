@@ -334,7 +334,7 @@
               "options": { "raw": { "language": "json" } }
             },
             "url": "{{baseUrl}}/api/checkout/quotes",
-            "description": "Choose locality and office using the lookup requests first. Send cityId and officeCode only, not free-form locality/office/address. Unknown, moved or unavailable office returns 400 VALIDATION_ERROR with details.receiving.officeCode=office_unavailable; provider errors return 503. Office is revalidated against the immutable quote at commitment. Customer delivery fee zero; no transfer/split fulfilment."
+            "description": "Choose locality and office using the lookup requests first. Send cityId and officeCode only, not free-form locality/office/address. The quote snapshots the provider locationType as well as the office details. Unknown, moved or unavailable office returns 400 VALIDATION_ERROR with details.receiving.officeCode=office_unavailable; provider errors return 503. Office is revalidated against the immutable quote at commitment. Customer delivery fee zero; no transfer/split fulfilment."
           },
           "response": []
         },

@@ -853,6 +853,7 @@ model OrderLine {
   sortOrder                       Int
   unitPrice                       Decimal            @db.Decimal(12, 2)
   snapshot                        Json
+  staffSnapshot                   Json?
   reservationReference            String?            @db.VarChar(128)
   reservedLocation                LocationCode?
   decision                        LineDecision       @default(pending)

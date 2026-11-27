@@ -208,7 +208,8 @@ export class CheckoutService {
             ...(receiving.method === 'econt_address'
               ? { address: receiving.address }
               : { office: office?.name, officeAddress: office?.address,
-                  cityId: office?.cityId, officeId: office?.id, officeCode: office?.code }),
+                  cityId: office?.cityId, officeId: office?.id, officeCode: office?.code,
+                  locationType: office?.locationType }),
           };
       const expiresAt = new Date(Date.now() + ttlSeconds * 1000);
       const total = new Prisma.Decimal(totalMinor.toString()).dividedBy(100);
