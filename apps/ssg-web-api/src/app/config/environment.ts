@@ -257,6 +257,14 @@ export function validateEnvironment(
     ([name, value]) => name !== 'sandboxRecipient' && value !== '' && value !== undefined,
   );
   const mailRecipients = parseMailRecipients(mailSettings.sandboxRecipient);
+  const purchaseFromName = environment.PURCHASE_SMTP_FROM_NAME ?? '';
+  if (
+    typeof purchaseFromName !== 'string' ||
+    purchaseFromName.length > 255 ||
+    /[\p{C}]/u.test(purchaseFromName)
+  ) {
+    throw new Error('PURCHASE_SMTP_FROM_NAME must be a valid display name');
+  }
   const purchaseSettings = {
     host: environment.PURCHASE_SMTP_HOST ?? '',
     port: environment.PURCHASE_SMTP_PORT ?? '',
@@ -397,6 +405,7 @@ export function validateEnvironment(
     PURCHASE_SMTP_USER: purchaseConfigured ? String(purchaseSettings.user).trim() : '',
     PURCHASE_SMTP_PASSWORD: purchaseConfigured ? purchaseSettings.password : '',
     PURCHASE_SMTP_FROM: purchaseConfigured ? String(purchaseSettings.from).trim() : '',
+    PURCHASE_SMTP_FROM_NAME: purchaseFromName.trim(),
     PURCHASE_SMTP_REPLY_TO: purchaseConfigured ? String(purchaseSettings.replyTo).trim() : '',
     ...workerNumbers,
   };

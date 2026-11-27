@@ -96,7 +96,9 @@ emails use `PURCHASE_SMTP_HOST`, `PURCHASE_SMTP_PORT`, `PURCHASE_SMTP_SECURE`,
 (implicit TLS); configure the username as `sales`, From as `sales@ssg.bg` and
 Reply-To as `office@ssg.bg`. Both From and the SMTP envelope sender use
 `PURCHASE_SMTP_FROM`. Supply the password through the deployment secret
-environment. Never guess or repeatedly test credentials: this provider blocks
+environment. Optionally set `PURCHASE_SMTP_FROM_NAME` for the customer-visible
+sender name; it does not change the From address or SMTP envelope sender.
+Never guess or repeatedly test credentials: this provider blocks
 IPs after three failed logins in seven days. The outbox retries failed sends,
 so disable the worker and resolve authentication failures promptly.
 Verified-payment confirmations include the purchased product images from the
