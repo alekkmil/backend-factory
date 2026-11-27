@@ -2,6 +2,7 @@ import { isAbsolute } from 'node:path';
 import { createPrivateKey, createPublicKey } from 'node:crypto';
 import { isEmail } from 'class-validator';
 import { boricaGatewayPublicKey } from '../modules/payments/borica-signature';
+import { parseMailRecipients } from '../common/outbox/mail-recipients';
 
 const defaultCorsOrigins = 'http://localhost:3000';
 
@@ -255,6 +256,36 @@ export function validateEnvironment(
   const smtpConfigured = Object.entries(mailSettings).some(
     ([name, value]) => name !== 'sandboxRecipient' && value !== '' && value !== undefined,
   );
+  const mailRecipients = parseMailRecipients(mailSettings.sandboxRecipient);
+  const purchaseSettings = {
+    host: environment.PURCHASE_SMTP_HOST ?? '',
+    port: environment.PURCHASE_SMTP_PORT ?? '',
+    secure: environment.PURCHASE_SMTP_SECURE ?? '',
+    user: environment.PURCHASE_SMTP_USER ?? '',
+    password: environment.PURCHASE_SMTP_PASSWORD ?? '',
+    from: environment.PURCHASE_SMTP_FROM ?? '',
+    replyTo: environment.PURCHASE_SMTP_REPLY_TO ?? '',
+  };
+  const purchaseConfigured = Object.values(purchaseSettings).some((value) => value !== '');
+  let purchasePort = 0;
+  if (purchaseConfigured) {
+    purchasePort = Number(purchaseSettings.port);
+    if (
+      typeof purchaseSettings.host !== 'string' || !purchaseSettings.host.trim() ||
+      /[\r\n]/.test(purchaseSettings.host) ||
+      typeof purchaseSettings.user !== 'string' || !purchaseSettings.user.trim() ||
+      typeof purchaseSettings.password !== 'string' || !purchaseSettings.password ||
+      typeof purchaseSettings.from !== 'string' || !isEmail(purchaseSettings.from) ||
+      typeof purchaseSettings.replyTo !== 'string' || !isEmail(purchaseSettings.replyTo) ||
+      (purchaseSettings.secure !== 'true' && purchaseSettings.secure !== 'false') ||
+      !Number.isInteger(purchasePort) || purchasePort < 1 || purchasePort > 65535 ||
+      (purchasePort === 465 && purchaseSettings.secure !== 'true') ||
+      (purchasePort === 587 && purchaseSettings.secure !== 'false') ||
+      !mailRecipients.length || !smtpConfigured
+    ) {
+      throw new Error('Complete PURCHASE_SMTP settings, standard SMTP, and MAIL_TO are required');
+    }
+  }
   const localTestMailEnabled =
     environment.LOCAL_TEST_MAIL_ENABLED ?? 'false';
   if (
@@ -286,7 +317,7 @@ export function validateEnvironment(
       typeof mailSettings.from !== 'string' ||
       !isEmail(mailSettings.from) ||
       typeof mailSettings.sandboxRecipient !== 'string' ||
-      (nodeEnv !== 'production' && !isEmail(mailSettings.sandboxRecipient))
+      (nodeEnv !== 'production' && !mailRecipients.length)
     ) {
       throw new Error(
         'SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASSWORD, MAIL_FROM and MAIL_TO must all be configured with valid values',
@@ -303,14 +334,16 @@ export function validateEnvironment(
         'Configure SMTP sandbox delivery or OUTBOX_CAPTURE_DIRECTORY when the worker is enabled',
       );
     }
-    if (nodeEnv !== 'production' && (typeof mailSettings.sandboxRecipient !== 'string' ||
-        !isEmail(mailSettings.sandboxRecipient))) {
+    if (nodeEnv !== 'production' && !mailRecipients.length) {
       throw new Error('MAIL_TO must be a controlled test recipient outside production');
     }
   }
   if (nodeEnv === 'production' && (captureDirectory ||
       (checkoutEnabled === 'true' && (!smtpConfigured || outboxWorkerEnabled !== 'true')))) {
     throw new Error('Production checkout requires SMTP and the outbox worker; local mail capture is prohibited');
+  }
+  if (nodeEnv === 'production' && checkoutEnabled === 'true' && !purchaseConfigured) {
+    throw new Error('PURCHASE_SMTP settings and MAIL_TO are required when production checkout is enabled');
   }
   const workerNumbers: Record<string, number> = {};
   for (const [name, defaultValue, minimum, maximum] of [
@@ -357,7 +390,14 @@ export function validateEnvironment(
     SMTP_USER: smtpConfigured ? String(mailSettings.user).trim() : '',
     SMTP_PASSWORD: smtpConfigured ? mailSettings.password : '',
     MAIL_FROM: smtpConfigured ? String(mailSettings.from).trim() : '',
-    MAIL_TO: String(mailSettings.sandboxRecipient).trim(),
+    MAIL_TO: mailRecipients.join(','),
+    PURCHASE_SMTP_HOST: purchaseConfigured ? String(purchaseSettings.host).trim() : '',
+    PURCHASE_SMTP_PORT: purchasePort,
+    PURCHASE_SMTP_SECURE: purchaseSettings.secure === 'true',
+    PURCHASE_SMTP_USER: purchaseConfigured ? String(purchaseSettings.user).trim() : '',
+    PURCHASE_SMTP_PASSWORD: purchaseConfigured ? purchaseSettings.password : '',
+    PURCHASE_SMTP_FROM: purchaseConfigured ? String(purchaseSettings.from).trim() : '',
+    PURCHASE_SMTP_REPLY_TO: purchaseConfigured ? String(purchaseSettings.replyTo).trim() : '',
     ...workerNumbers,
   };
 }

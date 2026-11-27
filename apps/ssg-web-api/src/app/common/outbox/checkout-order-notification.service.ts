@@ -117,7 +117,7 @@ export class CheckoutOrderNotificationService {
         message.dedupeKey !== `bank-payment:${payload.payment_attempt_id}`))
     ) throw new OutboxDispatchError('JOB_PAYLOAD_INVALID');
     try {
-      const prior = await this.mail.lookup(message.id);
+      const prior = await this.mail.lookup(message.id, 'purchase');
       if (prior) return { outcome: 'sent', providerMessageId: prior };
       const grant = await this.prisma.accessGrant.findUnique({
         where: { id: payload.grant_id },
@@ -225,7 +225,7 @@ export class CheckoutOrderNotificationService {
         outcome: 'sent',
         providerMessageId: await this.mail.deliver(message.id, {
           recipient: message.recipientSnapshot, subject, text, html,
-        }),
+        }, 'purchase'),
       };
     } catch (error) {
       if (error instanceof MailCaptureError || error instanceof MailDeliveryError) {

@@ -71,7 +71,7 @@ export class OrderNotificationService implements OutboxJobHandler {
     }
     try {
       // Reconcile external acceptance before looking at state that may have changed.
-      const prior = await this.mailDelivery.lookup(message.id);
+      const prior = await this.mailDelivery.lookup(message.id, 'purchase');
       if (prior) {
         return { outcome: 'sent', providerMessageId: prior };
       }
@@ -233,7 +233,7 @@ export class OrderNotificationService implements OutboxJobHandler {
       return {
         outcome: 'sent',
         providerMessageId: await this.mailDelivery.deliver(
-          message.id, renderMail(message.recipientSnapshot, subject, fields),
+          message.id, renderMail(message.recipientSnapshot, subject, fields), 'purchase',
         ),
       };
     } catch (error) {

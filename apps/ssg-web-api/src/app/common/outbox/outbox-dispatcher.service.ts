@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { isEmail } from 'class-validator';
+import { isEmail, isUUID } from 'class-validator';
+import { createHash } from 'node:crypto';
 import type { JobKind, Locale } from '../../../generated/prisma/enums';
 import { Prisma } from '../../../generated/prisma/client';
 import { PrismaService } from '../../database/prisma.service';
@@ -8,7 +9,7 @@ import { configurationUrl } from '../../modules/products/product-read.service';
 import { MailDeliveryService, MailDeliveryError } from './mail-delivery.service';
 import { MailCaptureError } from './local-mail-capture.service';
 import { OrderNotificationService } from './order-notification.service';
-import { OutboxDispatchError } from './outbox-handler';
+import { OutboxDispatchError, renderMail } from './outbox-handler';
 import { renderEnquiryMail } from './enquiry-mail-template';
 import type { EnquiryMailContext, EnquiryMailKind } from './enquiry-mail-template';
 import type { OutboxDispatchResult, OutboxJobHandler } from './outbox-handler';
@@ -77,7 +78,7 @@ export class OutboxDispatcherService {
   register(kind: JobKind, handler: OutboxJobHandler): void {
     if (
       this.handlers.has(kind) ||
-      ['inquiry_received', 'customer_payment_received', 'customer_order_confirmed'].includes(kind)
+      ['inquiry_received', 'customer_payment_received', 'customer_order_confirmed', 'ops_payment_received'].includes(kind)
     ) {
       throw new Error(`An outbox handler is already registered for ${kind}`);
     }
@@ -102,6 +103,9 @@ export class OutboxDispatcherService {
     if (message.kind === 'inquiry_received') {
       return this.deliverInquiry(message);
     }
+    if (message.kind === 'ops_payment_received') {
+      return this.deliverStaffPayment(message);
+    }
     if (
       message.kind === 'customer_payment_received' ||
       message.kind === 'customer_order_confirmed'
@@ -113,6 +117,47 @@ export class OutboxDispatcherService {
       throw new OutboxDispatchError('JOB_HANDLER_UNAVAILABLE');
     }
     return handler.dispatch(message);
+  }
+
+  private async deliverStaffPayment(message: ClaimedOutboxMessage): Promise<OutboxDispatchResult> {
+    const payload = message.payload;
+    if (
+      !isJsonRecord(payload) || !message.orderId || message.inquiryId || message.encryptedSecret ||
+      !message.recipientSnapshot || !isEmail(message.recipientSnapshot) ||
+      message.templateVersion !== 'verified-payment-staff-v1' ||
+      payload.order_id !== message.orderId || typeof payload.payment_attempt_id !== 'string' ||
+      !isUUID(payload.payment_attempt_id) ||
+      Object.keys(payload).some((key) => !['order_id', 'payment_attempt_id'].includes(key))
+    ) throw new OutboxDispatchError('JOB_PAYLOAD_INVALID');
+    const recipientHash = createHash('sha256').update(message.recipientSnapshot.toLowerCase()).digest('hex');
+    if (message.dedupeKey !== `bank-payment-staff:${payload.payment_attempt_id}:${recipientHash}`) {
+      throw new OutboxDispatchError('JOB_PAYLOAD_INVALID');
+    }
+    const attempt = await this.prisma.bankPaymentAttempt.findUnique({
+      where: { id: payload.payment_attempt_id }, include: { order: true },
+    });
+    if (!attempt || attempt.orderId !== message.orderId || attempt.order.sandbox ||
+        attempt.outcome !== 'paid' || !attempt.paidAt) {
+      throw new OutboxDispatchError('CHECKOUT_SNAPSHOT_UNAVAILABLE');
+    }
+    const review = attempt.manualReviewRequired || !attempt.amount.equals(attempt.order.total) ||
+      attempt.currency !== attempt.order.currency;
+    const mail = renderMail(message.recipientSnapshot, `Verified payment — order ${attempt.order.number}`, [
+      ['Order', attempt.order.number],
+      ['Amount received', `${attempt.amount.toFixed(2)} ${attempt.currency}`],
+      ['Verified at', attempt.paidAt.toISOString()],
+      ['Manual payment review required', review ? 'Yes' : 'No'],
+    ]);
+    try {
+      const prior = await this.mailDelivery.lookup(message.id, 'staff-payment');
+      if (prior) return { outcome: 'sent', providerMessageId: prior };
+      return { outcome: 'sent', providerMessageId: await this.mailDelivery.deliver(message.id, mail, 'staff-payment') };
+    } catch (error) {
+      if (error instanceof MailCaptureError || error instanceof MailDeliveryError) {
+        throw new OutboxDispatchError(error.code);
+      }
+      throw error;
+    }
   }
 
   private async deliverInquiry(

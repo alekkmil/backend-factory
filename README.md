@@ -76,17 +76,33 @@ immutable record, but responses use `PUBLIC_SITE_ORIGIN`; malformed URLs and
 incorrect policy paths remain unavailable. New policy publication still requires
 the current configured origin.
 
-Enable `OUTBOX_WORKER_ENABLED` and configure SMTP. Non-production mail subjects
-have `[DEV]` prefixes and require `MAIL_TO`. With `NODE_ENV=development`, SMTP
-sends to the stored intended recipient and BCCs `MAIL_TO`; matching addresses
-are deduplicated case-insensitively. Both copies contain the same single-use
-order-access link, so use controlled customer test inboxes and redeem it only
-once. Local/test SMTP and all private capture remain restricted to `MAIL_TO`.
-Production sends only to the stored actual recipient without the prefix and
-requires SMTP plus the outbox worker when checkout is enabled; local mail
-capture is prohibited. SMTP is at-least-once: a deterministic Message-ID does
-not guarantee provider-side deduplication. Rejection of any recipient fails
-the delivery for outbox retry; recipients already accepted may receive duplicates.
+Enable `OUTBOX_WORKER_ENABLED` and configure standard `SMTP_*` and `MAIL_FROM`
+for enquiries and staff payment notifications. Set `MAIL_TO` to a
+comma-separated list of staff addresses; duplicates are removed
+case-insensitively. Each verified payment queues a separate staff email per
+address, without a customer order-access link. Existing already-queued payments
+are not backfilled.
+
+Customer payment confirmations, order-access links, and other customer order
+emails use `PURCHASE_SMTP_HOST`, `PURCHASE_SMTP_PORT`, `PURCHASE_SMTP_SECURE`,
+`PURCHASE_SMTP_USER`, `PURCHASE_SMTP_PASSWORD`, `PURCHASE_SMTP_FROM` and
+`PURCHASE_SMTP_REPLY_TO`. For the SSG account use `mail.ssg.bg`, port 587 with
+`PURCHASE_SMTP_SECURE=false` (STARTTLS is required), or port 465 with `true`
+(implicit TLS); configure the username as `sales`, From as `sales@ssg.bg` and
+Reply-To as `office@ssg.bg`. Both From and the SMTP envelope sender use
+`PURCHASE_SMTP_FROM`. Supply the password through the deployment secret
+environment. Never guess or repeatedly test credentials: this provider blocks
+IPs after three failed logins in seven days. The outbox retries failed sends,
+so disable the worker and resolve authentication failures promptly.
+
+Production checkout requires both SMTP configurations, `MAIL_TO`, and the
+outbox worker. Customer order SMTP does not fall back to standard SMTP if the
+purchase account is missing. Non-production subjects have `[DEV]` prefixes.
+Development SMTP sends to the intended recipient; standard enquiries also BCC
+`MAIL_TO`, but customer order emails and staff payment notifications do not.
+Local/test SMTP and private capture route to the first `MAIL_TO` address; use
+controlled test inboxes. SMTP is at-least-once: a deterministic Message-ID does
+not guarantee provider-side deduplication.
 
 #### Stock and payment policy
 

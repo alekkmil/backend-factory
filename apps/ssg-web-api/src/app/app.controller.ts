@@ -12,6 +12,7 @@ import { randomUUID } from 'node:crypto';
 import { MailDeliveryError, MailDeliveryService } from './common/outbox/mail-delivery.service';
 import { renderMail } from './common/outbox/outbox-handler';
 import { LocalTestMailDto } from './modules/local-test-mail.dto';
+import { parseMailRecipients } from './common/outbox/mail-recipients';
 
 @Controller()
 export class AppController {
@@ -29,7 +30,8 @@ export class AppController {
       throw new NotFoundException();
     }
 
-    const recipient = this.config.getOrThrow<string>('MAIL_TO');
+    const recipient = parseMailRecipients(this.config.getOrThrow<string>('MAIL_TO'))[0];
+    if (!recipient) throw new ServiceUnavailableException({ code: 'SMTP_CONFIGURATION_UNAVAILABLE' });
     const mail = renderMail(recipient, '[TEST] SSG enquiry notification', [
       ['Topic', input.topic],
       ['Message', input.message],
