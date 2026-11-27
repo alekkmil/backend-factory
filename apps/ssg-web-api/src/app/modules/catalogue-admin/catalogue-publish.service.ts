@@ -264,6 +264,9 @@ export class CataloguePublishService {
       from_RevisionImage_revisionId: {
         orderBy: { sortOrder: 'asc' as const }, select: { assetId: true, sortOrder: true },
       },
+      from_RevisionSetProduct_revisionId: {
+        orderBy: { sortOrder: 'asc' as const }, select: { relatedProductId: true, sortOrder: true },
+      },
     } satisfies Prisma.ProductRevisionSelect;
     const before = await transaction.productRevision.findUniqueOrThrow({ where: { id: oldId }, select });
     const after = await transaction.productRevision.findUniqueOrThrow({ where: { id: newId }, select });

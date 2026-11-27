@@ -36,6 +36,9 @@ function normalizedText(value: string | null, maximum: number): string | null {
 function normalizeDraft(input: CatalogueSaveDraftDto['draft']): NormalizedDraft {
   if (input.model_price != null) modelPriceAmount(input.model_price);
   const draft: NormalizedDraft = {
+    ...(input.related_set_product_ids === undefined ? {} : {
+      related_set_product_ids: input.related_set_product_ids.map((id) => id.toLowerCase()),
+    }),
     ...(input.model_price === undefined ? {} : {
       model_price: input.model_price === null ? null : {
         amount: input.model_price.amount, currency: 'EUR',
@@ -85,7 +88,9 @@ function normalizeDraft(input: CatalogueSaveDraftDto['draft']): NormalizedDraft 
     new Set(draft.fulfilment_methods).size !== draft.fulfilment_methods.length ||
     new Set(draft.delivery_locality_ids).size !== draft.delivery_locality_ids.length ||
     new Set(draft.pickup_location_codes).size !== draft.pickup_location_codes.length ||
-    new Set(draft.image_ids).size !== draft.image_ids.length
+    new Set(draft.image_ids).size !== draft.image_ids.length ||
+    (draft.related_set_product_ids !== undefined &&
+      new Set(draft.related_set_product_ids).size !== draft.related_set_product_ids.length)
   ) throw new BadRequestException();
   if (
     draft.materials.some((material) => !material.material_code ||
@@ -336,6 +341,14 @@ export class CatalogueDraftService {
               })),
             });
           }
+          if (draft.related_set_product_ids !== undefined) {
+            await transaction.revisionSetProduct.deleteMany({ where: { revisionId } });
+            await transaction.revisionSetProduct.createMany({
+              data: draft.related_set_product_ids.map((relatedProductId, index) => ({
+                revisionId, relatedProductId, sortOrder: index + 1,
+              })),
+            });
+          }
           const updated = await transaction.product.update({
             where: { id: productId },
             data: { version: { increment: 1 } },
@@ -382,6 +395,18 @@ export class CatalogueDraftService {
     productId: string,
     draft: NormalizedDraft,
   ): Promise<void> {
+    if (draft.related_set_product_ids?.length) {
+      if (draft.product_type !== 'jewellery' ||
+          draft.related_set_product_ids.includes(productId.toLowerCase())) {
+        throw new BadRequestException({ code: 'VALIDATION_ERROR', message_key: 'errors.validation' });
+      }
+      const count = await transaction.product.count({
+        where: { id: { in: draft.related_set_product_ids }, productType: 'jewellery' },
+      });
+      if (count !== draft.related_set_product_ids.length) {
+        throw new BadRequestException({ code: 'VALIDATION_ERROR', message_key: 'errors.validation' });
+      }
+    }
     for (const text of draft.seo_translations ?? []) {
       if (text.og_image_id && !draft.image_ids.includes(text.og_image_id)) {
         throw new BadRequestException({

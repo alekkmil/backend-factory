@@ -98,6 +98,12 @@ export class ProductSeoTranslationDto {
 }
 
 export class ProductDraftInputDto {
+  @ValidateIf((_, value: unknown) => value !== undefined)
+  @IsArray()
+  @ArrayMaxSize(5)
+  @IsUUID(undefined, { each: true })
+  related_set_product_ids?: string[];
+
   @ValidateIf((_, value: unknown) => value !== undefined && value !== null)
   @IsDefined()
   @ValidateNested()
@@ -280,6 +286,7 @@ export interface AdminCatalogueList {
 }
 
 export interface ProductDraft {
+  related_set_product_ids?: string[];
   model_price?: ModelPriceDto | null;
   seo_translations?: ProductSeoTranslationDto[];
   specifications?: JewellerySpecificationsDto | null;

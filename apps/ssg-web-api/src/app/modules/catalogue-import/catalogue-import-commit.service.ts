@@ -689,6 +689,9 @@ export class CatalogueImportCommitService {
           from_RevisionGemstone_revisionId: {
             select: { gemstoneId: true },
           },
+          from_RevisionSetProduct_revisionId: {
+            select: { relatedProductId: true, sortOrder: true },
+          },
         },
       });
       for (const material of currentChildren?.from_RevisionMaterial_revisionId ?? []) {
@@ -696,6 +699,11 @@ export class CatalogueImportCommitService {
           data: { revisionId: revision.id, ...material },
         });
       }
+      await transaction.revisionSetProduct.createMany({
+        data: (currentChildren?.from_RevisionSetProduct_revisionId ?? []).map((link) => ({
+          revisionId: revision.id, ...link,
+        })),
+      });
       for (const translation of currentChildren?.from_ProductTranslation_revisionId ?? []) {
         await transaction.productTranslation.create({
           data: { revisionId: revision.id, ...translation },

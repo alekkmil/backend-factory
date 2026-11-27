@@ -1323,6 +1323,30 @@ configuring cookies. These writes do not invent consent choices or policy text.
 
 ### Catalogue draft editing, visibility and reviewed-media registration
 
+#### Complete the set
+
+The admin detail `draft.related_set_product_ids` is an ordered array of up to
+five distinct jewellery product UUIDs. The owning product must be jewellery;
+each target must exist and cannot be the owner. Links are directional, and
+targets may be drafts or hidden. In `PATCH /api/admin/catalogue/:id/draft`,
+omit the field to preserve the selection, send an ordered array to replace or
+reorder it, or send `[]` to clear it. Saving only changes the draft; publish
+the draft through `POST /api/admin/catalogue/:id/publish` to make it public.
+
+`GET /api/products/:id?locale=bg|en` returns `complete_the_set`, an array in
+the saved order containing the existing product-card shape: `id`, `name`,
+`locale`, `url`, `primary_image`, and `commercial_result` (including
+`display_price`, `primary_action`, fulfilment options and `can_submit_order`).
+Other existing summary fields are also present. The selection is shared by
+both locales; unpublished or hidden targets are excluded. Each piece keeps
+its own price and purchase eligibility. Existing `related_products` is
+unchanged. Frontends should hide the section when the array is empty and use
+the title „Допълнете комплекта“ / “Complete the set” above Similar jewellery.
+
+The additive `20261127120000_add_revision_set_products` migration is required.
+Existing products start with empty selections; no existing related links are
+reinterpreted.
+
 #### Model display price without inventory
 
 Draft save and product import accept optional
