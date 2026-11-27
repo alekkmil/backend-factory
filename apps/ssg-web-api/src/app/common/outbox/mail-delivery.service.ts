@@ -93,8 +93,11 @@ export class MailDeliveryService {
     if (!recipient || !isEmail(recipient)) {
       throw new MailDeliveryError("SMTP_CONFIGURATION_UNAVAILABLE");
     }
+    const fromName = (channel === "purchase" && this.config.get<string>("PURCHASE_SMTP_FROM_NAME")) ||
+      mail.fromName;
     const outgoing = {
       ...mail,
+      ...(fromName ? { fromName } : {}),
       recipient,
       subject: production || mail.subject.startsWith("[DEV] ") ? mail.subject : `[DEV] ${mail.subject}`,
     };
@@ -111,7 +114,7 @@ export class MailDeliveryService {
     const messageId = `<${createHash("sha256").update(key).digest("hex")}@ssg-web-api.invalid>`;
     try {
       const result = await transporter.sendMail({
-        from: mail.fromName ? { name: mail.fromName, address: from } : from,
+        from: fromName ? { name: fromName, address: from } : from,
         to: recipient,
         ...(development && channel === "standard"
           ? { bcc: testRecipients.filter((address) => address.toLowerCase() !== recipient.toLowerCase()) }
