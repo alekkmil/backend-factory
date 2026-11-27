@@ -3,16 +3,16 @@ import {
   Logger,
   NotFoundException,
   ServiceUnavailableException,
-} from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
-import { Prisma } from '../../../generated/prisma/client';
+} from "@nestjs/common";
+import { ConfigService } from "@nestjs/config";
+import { Prisma } from "../../../generated/prisma/client";
 import type {
   Locale,
   LocationCode,
   ProductType,
   StockStatus,
-} from '../../../generated/prisma/enums';
-import { CommercialEvaluator } from '../../common/commercial/commercial-evaluator';
+} from "../../../generated/prisma/enums";
+import { CommercialEvaluator } from "../../common/commercial/commercial-evaluator";
 import type {
   CommercialProductInput,
   CommercialSettingsInput,
@@ -20,13 +20,15 @@ import type {
   FulfilmentContext,
   FulfilmentOptions,
   PublicFacts,
-} from '../../common/commercial/commercial-evaluator';
-import { PrismaService } from '../../database/prisma.service';
+} from "../../common/commercial/commercial-evaluator";
+import { PrismaService } from "../../database/prisma.service";
 import {
-  projectSpecifications, readSpecifications, readSpecificationDictionary,
+  projectSpecifications,
+  readSpecifications,
+  readSpecificationDictionary,
   specificationCodes,
-} from '../../common/jewellery-specifications';
-import type { JewellerySpecificationsDto } from '../../common/jewellery-specifications';
+} from "../../common/jewellery-specifications";
+import type { JewellerySpecificationsDto } from "../../common/jewellery-specifications";
 
 const PRODUCT_SELECT = {
   id: true,
@@ -62,7 +64,7 @@ const PRODUCT_SELECT = {
         },
       },
       from_RevisionImage_revisionId: {
-        orderBy: { sortOrder: 'asc' },
+        orderBy: { sortOrder: "asc" },
         select: {
           sortOrder: true,
           assetIdRelation: {
@@ -104,21 +106,19 @@ const PRODUCT_SELECT = {
 } satisfies Prisma.ProductSelect;
 
 type ProductRow = Prisma.ProductGetPayload<{ select: typeof PRODUCT_SELECT }>;
-type ProductRevisionRow = NonNullable<ProductRow['currentRevisionIdRelation']>;
-type RevisionImageRow =
-  ProductRevisionRow['from_RevisionImage_revisionId'][number];
+
 type MediaAssetRow = Pick<
   Prisma.MediaAssetGetPayload<Record<string, never>>,
-  | 'id'
-  | 'releaseId'
-  | 'logicalImageId'
-  | 'role'
-  | 'derivatives'
-  | 'altBg'
-  | 'altEn'
-  | 'processedWithAi'
-  | 'onModelIllustrative'
-  | 'reviewStatus'
+  | "id"
+  | "releaseId"
+  | "logicalImageId"
+  | "role"
+  | "derivatives"
+  | "altBg"
+  | "altEn"
+  | "processedWithAi"
+  | "onModelIllustrative"
+  | "reviewStatus"
 >;
 
 interface PublicMedia {
@@ -147,7 +147,7 @@ export interface ProductSummary {
   url: string;
   alternate_urls: { bg: string | null; en: string | null };
   primary_image: PublicMedia;
-  commercial_result: ReturnType<CommercialEvaluator['evaluateProduct']>;
+  commercial_result: ReturnType<CommercialEvaluator["evaluateProduct"]>;
 }
 
 interface ProductDetail extends ProductSummary {
@@ -173,6 +173,7 @@ interface ProductDetail extends ProductSummary {
     fulfilment_options: FulfilmentOptions;
   }[];
   related_products: ProductSummary[];
+  complete_the_set: ProductSummary[];
   dates: {
     first_published_at: string | null;
     public_modified_at: string | null;
@@ -191,9 +192,11 @@ interface StockRow {
 }
 
 interface ProjectedData {
-  specificationDictionary?: Awaited<ReturnType<typeof readSpecificationDictionary>>;
+  specificationDictionary?: Awaited<
+    ReturnType<typeof readSpecificationDictionary>
+  >;
   product: ProductRow;
-  revision: NonNullable<ProductRow['currentRevisionIdRelation']>;
+  revision: NonNullable<ProductRow["currentRevisionIdRelation"]>;
   stocks: StockRow[];
   settings: CommercialSettingsInput | null;
   routes: Map<Locale, string>;
@@ -224,7 +227,7 @@ interface Derivative {
 }
 
 function isJsonRecord(value: Prisma.JsonValue): value is Prisma.JsonObject {
-  return value !== null && typeof value === 'object' && !Array.isArray(value);
+  return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
 export function configurationUrl(
@@ -235,8 +238,8 @@ export function configurationUrl(
   const value = config.get<string>(key);
   if (!value) {
     throw new ServiceUnavailableException({
-      code: 'CONFIGURATION_UNAVAILABLE',
-      message_key: 'errors.configuration_unavailable',
+      code: "CONFIGURATION_UNAVAILABLE",
+      message_key: "errors.configuration_unavailable",
     });
   }
   let url: URL;
@@ -244,45 +247,48 @@ export function configurationUrl(
     url = new URL(value);
   } catch {
     throw new ServiceUnavailableException({
-      code: 'CONFIGURATION_UNAVAILABLE',
-      message_key: 'errors.configuration_unavailable',
+      code: "CONFIGURATION_UNAVAILABLE",
+      message_key: "errors.configuration_unavailable",
     });
   }
   if (
-    !['http:', 'https:'].includes(url.protocol) ||
-    (production && url.protocol !== 'https:') ||
+    !["http:", "https:"].includes(url.protocol) ||
+    (production && url.protocol !== "https:") ||
     url.username.length > 0 ||
     url.password.length > 0 ||
     url.search.length > 0 ||
     url.hash.length > 0 ||
-    (key === 'PUBLIC_SITE_ORIGIN' && url.pathname !== '/')
+    (key === "PUBLIC_SITE_ORIGIN" && url.pathname !== "/")
   ) {
     throw new ServiceUnavailableException({
-      code: 'CONFIGURATION_UNAVAILABLE',
-      message_key: 'errors.configuration_unavailable',
+      code: "CONFIGURATION_UNAVAILABLE",
+      message_key: "errors.configuration_unavailable",
     });
   }
-  if (!url.pathname.endsWith('/')) {
-    url.pathname += '/';
+  if (!url.pathname.endsWith("/")) {
+    url.pathname += "/";
   }
   return url;
 }
 
-export function readDerivative(value: Prisma.JsonValue, naturalSize = false): Derivative {
+export function readDerivative(
+  value: Prisma.JsonValue,
+  naturalSize = false,
+): Derivative {
   if (
     !isJsonRecord(value) ||
-    typeof value.size !== 'number' ||
-    typeof value.width !== 'number' ||
-    typeof value.height !== 'number' ||
-    typeof value.object_key !== 'string' ||
-    typeof value.mime !== 'string' ||
-    typeof value.colour_space !== 'string' ||
-    typeof value.bytes !== 'number' ||
-    typeof value.sha256 !== 'string'
+    typeof value.size !== "number" ||
+    typeof value.width !== "number" ||
+    typeof value.height !== "number" ||
+    typeof value.object_key !== "string" ||
+    typeof value.mime !== "string" ||
+    typeof value.colour_space !== "string" ||
+    typeof value.bytes !== "number" ||
+    typeof value.sha256 !== "string"
   ) {
     throw new ServiceUnavailableException({
-      code: 'MEDIA_NOT_READY',
-      message_key: 'errors.media_not_ready',
+      code: "MEDIA_NOT_READY",
+      message_key: "errors.media_not_ready",
     });
   }
   if (
@@ -292,24 +298,24 @@ export function readDerivative(value: Prisma.JsonValue, naturalSize = false): De
     value.height < 1 ||
     value.height > value.size ||
     (!naturalSize && Math.max(value.width, value.height) !== value.size) ||
-    value.mime !== 'image/webp' ||
-    value.colour_space !== 'sRGB' ||
+    value.mime !== "image/webp" ||
+    value.colour_space !== "sRGB" ||
     value.bytes < 1 ||
     !/^[0-9a-f]{64}$/.test(value.sha256) ||
-    value.object_key.startsWith('/') ||
-    value.object_key.includes('\\') ||
-    value.object_key.split('/').some((part) => part === '.' || part === '..') ||
-    value.object_key.includes('?') ||
-    value.object_key.includes('#') ||
-    value.object_key.includes('%') ||
+    value.object_key.startsWith("/") ||
+    value.object_key.includes("\\") ||
+    value.object_key.split("/").some((part) => part === "." || part === "..") ||
+    value.object_key.includes("?") ||
+    value.object_key.includes("#") ||
+    value.object_key.includes("%") ||
     [...value.object_key].some((character) => {
       const code = character.charCodeAt(0);
       return code <= 0x1f || code === 0x7f;
     })
   ) {
     throw new ServiceUnavailableException({
-      code: 'MEDIA_NOT_READY',
-      message_key: 'errors.media_not_ready',
+      code: "MEDIA_NOT_READY",
+      message_key: "errors.media_not_ready",
     });
   }
   return {
@@ -331,30 +337,32 @@ export function projectMedia(
   releaseId: string | null,
 ): PublicMedia {
   if (
-    asset.reviewStatus !== 'approved' ||
+    asset.reviewStatus !== "approved" ||
     releaseId === null ||
     asset.releaseId !== releaseId
   ) {
     throw new ServiceUnavailableException({
-      code: 'MEDIA_NOT_READY',
-      message_key: 'errors.media_not_ready',
+      code: "MEDIA_NOT_READY",
+      message_key: "errors.media_not_ready",
     });
   }
   if (!Array.isArray(asset.derivatives)) {
     throw new ServiceUnavailableException({
-      code: 'MEDIA_NOT_READY',
-      message_key: 'errors.media_not_ready',
+      code: "MEDIA_NOT_READY",
+      message_key: "errors.media_not_ready",
     });
   }
-  const derivatives = asset.derivatives.map((item) => readDerivative(item, asset.role === 'editorial'));
+  const derivatives = asset.derivatives.map((item) =>
+    readDerivative(item, asset.role === "editorial"),
+  );
   const bySize = new Map(derivatives.map((item) => [item.size, item]));
   if (
     derivatives.length !== 4 ||
     [200, 400, 800, 1600].some((size) => !bySize.has(size))
   ) {
     throw new ServiceUnavailableException({
-      code: 'MEDIA_NOT_READY',
-      message_key: 'errors.media_not_ready',
+      code: "MEDIA_NOT_READY",
+      message_key: "errors.media_not_ready",
     });
   }
   const urlFor = (size: number): string | null => {
@@ -368,19 +376,19 @@ export function projectMedia(
       !url.pathname.startsWith(cdnOrigin.pathname)
     ) {
       throw new ServiceUnavailableException({
-        code: 'MEDIA_NOT_READY',
-        message_key: 'errors.media_not_ready',
+        code: "MEDIA_NOT_READY",
+        message_key: "errors.media_not_ready",
       });
     }
     return url.toString();
   };
-  const alt = locale === 'bg' ? asset.altBg : asset.altEn;
+  const alt = locale === "bg" ? asset.altBg : asset.altEn;
   const largest = bySize.get(1600);
   const defaultUrl = urlFor(800);
   if (!alt || alt.trim().length === 0 || !largest || !defaultUrl) {
     throw new ServiceUnavailableException({
-      code: 'MEDIA_NOT_READY',
-      message_key: 'errors.media_not_ready',
+      code: "MEDIA_NOT_READY",
+      message_key: "errors.media_not_ready",
     });
   }
   return {
@@ -405,8 +413,8 @@ function commercialProduct(product: ProductRow): CommercialProductInput {
   const revision = product.currentRevisionIdRelation;
   if (!revision) {
     throw new ServiceUnavailableException({
-      code: 'TEMPORARY_UNAVAILABLE',
-      message_key: 'errors.temporary_unavailable',
+      code: "TEMPORARY_UNAVAILABLE",
+      message_key: "errors.temporary_unavailable",
     });
   }
   return {
@@ -442,19 +450,19 @@ export function routeUrl(path: string, origin: URL): string {
     return code <= 0x1f || code === 0x7f;
   });
   if (
-    !path.startsWith('/') ||
-    path.startsWith('//') ||
-    path.includes('\\') ||
-    path.includes('%') ||
-    path.includes('?') ||
-    path.includes('#') ||
+    !path.startsWith("/") ||
+    path.startsWith("//") ||
+    path.includes("\\") ||
+    path.includes("%") ||
+    path.includes("?") ||
+    path.includes("#") ||
     hasControlCharacters ||
-    path.normalize('NFC') !== path ||
-    path.split('/').some((part) => part === '.' || part === '..')
+    path.normalize("NFC") !== path ||
+    path.split("/").some((part) => part === "." || part === "..")
   ) {
     throw new ServiceUnavailableException({
-      code: 'ROUTE_CONFLICT',
-      message_key: 'errors.route_unavailable',
+      code: "ROUTE_CONFLICT",
+      message_key: "errors.route_unavailable",
     });
   }
   return new URL(path, origin).toString();
@@ -495,10 +503,10 @@ export class ProductReadService {
         error instanceof Prisma.PrismaClientUnknownRequestError ||
         error instanceof Prisma.PrismaClientInitializationError
       ) {
-        this.logger.warn('Product detail lookup is unavailable');
+        this.logger.warn("Product detail lookup is unavailable");
         throw new ServiceUnavailableException({
-          code: 'TEMPORARY_UNAVAILABLE',
-          message_key: 'errors.temporary_unavailable',
+          code: "TEMPORARY_UNAVAILABLE",
+          message_key: "errors.temporary_unavailable",
         });
       }
       throw error;
@@ -511,7 +519,7 @@ export class ProductReadService {
   ): Promise<{
     items: {
       id: string;
-      state: 'available' | 'unavailable';
+      state: "available" | "unavailable";
       product: ProductSummary | null;
     }[];
   }> {
@@ -534,8 +542,8 @@ export class ProductReadService {
           const items = uniqueIds.map((id) => {
             const product = byId.get(id.toLowerCase());
             return product
-              ? { id, state: 'available' as const, product }
-              : { id, state: 'unavailable' as const, product: null };
+              ? { id, state: "available" as const, product }
+              : { id, state: "unavailable" as const, product: null };
           });
           return { items };
         },
@@ -547,10 +555,10 @@ export class ProductReadService {
         error instanceof Prisma.PrismaClientUnknownRequestError ||
         error instanceof Prisma.PrismaClientInitializationError
       ) {
-        this.logger.warn('Product batch lookup is unavailable');
+        this.logger.warn("Product batch lookup is unavailable");
         throw new ServiceUnavailableException({
-          code: 'TEMPORARY_UNAVAILABLE',
-          message_key: 'errors.temporary_unavailable',
+          code: "TEMPORARY_UNAVAILABLE",
+          message_key: "errors.temporary_unavailable",
         });
       }
       throw error;
@@ -569,17 +577,17 @@ export class ProductReadService {
     const products = await transaction.product.findMany({
       where: {
         id: { in: ids },
-        publicationStatus: 'published',
+        publicationStatus: "published",
         currentRevisionIdRelation: {
           is: {
-            state: 'published',
+            state: "published",
             from_ProductTranslation_revisionId: {
               some: { locale },
             },
           },
         },
       },
-      orderBy: { id: 'asc' },
+      orderBy: { id: "asc" },
       select: PRODUCT_SELECT,
     });
     if (products.length === 0) {
@@ -588,7 +596,7 @@ export class ProductReadService {
     const productIds = products.map((product) => product.id);
     const stocks = await transaction.stockItem.findMany({
       where: { productId: { in: productIds } },
-      orderBy: [{ locationCode: 'asc' }, { id: 'asc' }],
+      orderBy: [{ locationCode: "asc" }, { id: "asc" }],
       select: {
         id: true,
         productId: true,
@@ -614,21 +622,21 @@ export class ProductReadService {
     const routes = await transaction.publicRoute.findMany({
       where: {
         productId: { in: productIds },
-        state: 'current',
-        locale: { in: ['bg', 'en'] },
+        state: "current",
+        locale: { in: ["bg", "en"] },
       },
       select: { productId: true, locale: true, path: true },
     });
 
-    const production = this.config.get<string>('NODE_ENV') === 'production';
+    const production = this.config.get<string>("NODE_ENV") === "production";
     const origin = configurationUrl(
       this.config,
-      'PUBLIC_SITE_ORIGIN',
+      "PUBLIC_SITE_ORIGIN",
       production,
     );
     const cdnOrigin = configurationUrl(
       this.config,
-      'MEDIA_CDN_BASE_URL',
+      "MEDIA_CDN_BASE_URL",
       production,
     );
     const stocksByProduct = new Map<string, StockRow[]>();
@@ -657,11 +665,15 @@ export class ProductReadService {
       : null;
 
     const candidates: CatalogProductCandidate[] = [];
-    const specifications = new Map(products.map(product => [
-      product.id, readSpecifications(product.currentRevisionIdRelation?.specifications),
-    ]));
+    const specifications = new Map(
+      products.map((product) => [
+        product.id,
+        readSpecifications(product.currentRevisionIdRelation?.specifications),
+      ]),
+    );
     const dictionary = await readSpecificationDictionary(
-      transaction, [...specifications.values()].flatMap(value => value ? [value] : []),
+      transaction,
+      [...specifications.values()].flatMap((value) => (value ? [value] : [])),
     );
     for (const product of products) {
       const revision = product.currentRevisionIdRelation;
@@ -688,12 +700,26 @@ export class ProductReadService {
         settings: settingsInput,
         units: commercialUnits(productStocks),
         jewelleryTypeCode: revision.jewelleryTypeIdRelation?.code ?? null,
-        materialCodes: [...new Set([...revision.from_RevisionMaterial_revisionId.map(
-          (entry) => entry.materialIdRelation.code,
-        ), ...codes.filter(entry => entry.group === 'material').map(entry => entry.code)])],
-        gemstoneCodes: [...new Set([...revision.from_RevisionGemstone_revisionId.map(
-          (entry) => entry.gemstoneIdRelation.code,
-        ), ...codes.filter(entry => entry.group === 'gemstone').map(entry => entry.code)])],
+        materialCodes: [
+          ...new Set([
+            ...revision.from_RevisionMaterial_revisionId.map(
+              (entry) => entry.materialIdRelation.code,
+            ),
+            ...codes
+              .filter((entry) => entry.group === "material")
+              .map((entry) => entry.code),
+          ]),
+        ],
+        gemstoneCodes: [
+          ...new Set([
+            ...revision.from_RevisionGemstone_revisionId.map(
+              (entry) => entry.gemstoneIdRelation.code,
+            ),
+            ...codes
+              .filter((entry) => entry.group === "gemstone")
+              .map((entry) => entry.code),
+          ]),
+        ],
       });
     }
     return candidates;
@@ -705,7 +731,7 @@ export class ProductReadService {
   ): Promise<void> {
     const data = await this.loadProductData(transaction, id);
     if (!data) throw new NotFoundException();
-    for (const locale of ['bg', 'en'] as const) {
+    for (const locale of ["bg", "en"] as const) {
       await this.projectSummary(transaction, data, locale, null);
       for (const image of data.revision.from_RevisionImage_revisionId) {
         projectMedia(
@@ -723,17 +749,17 @@ export class ProductReadService {
     id: string,
   ): Promise<ProjectedData | null> {
     const product = await transaction.product.findFirst({
-      where: { id, publicationStatus: 'published' },
+      where: { id, publicationStatus: "published" },
       select: PRODUCT_SELECT,
     });
     const revision = product?.currentRevisionIdRelation;
-    if (!product || !revision || revision.state !== 'published') {
+    if (!product || !revision || revision.state !== "published") {
       return null;
     }
 
     const stocks = await transaction.stockItem.findMany({
       where: { productId: product.id },
-      orderBy: [{ locationCode: 'asc' }, { id: 'asc' }],
+      orderBy: [{ locationCode: "asc" }, { id: "asc" }],
       select: {
         id: true,
         status: true,
@@ -758,22 +784,22 @@ export class ProductReadService {
     const routes = await transaction.publicRoute.findMany({
       where: {
         productId: product.id,
-        state: 'current',
-        locale: { in: ['bg', 'en'] },
+        state: "current",
+        locale: { in: ["bg", "en"] },
       },
       select: { locale: true, path: true },
     });
 
     const routeMap = new Map(routes.map((route) => [route.locale, route.path]));
-    const production = this.config.get<string>('NODE_ENV') === 'production';
+    const production = this.config.get<string>("NODE_ENV") === "production";
     const origin = configurationUrl(
       this.config,
-      'PUBLIC_SITE_ORIGIN',
+      "PUBLIC_SITE_ORIGIN",
       production,
     );
     const cdnOrigin = configurationUrl(
       this.config,
-      'MEDIA_CDN_BASE_URL',
+      "MEDIA_CDN_BASE_URL",
       production,
     );
     return {
@@ -814,11 +840,11 @@ export class ProductReadService {
         revision.mediaReleaseId,
       ),
     );
-    const mainImage = media.find((image) => image.role === 'main');
+    const mainImage = media.find((image) => image.role === "main");
     if (!mainImage) {
       throw new ServiceUnavailableException({
-        code: 'MEDIA_NOT_READY',
-        message_key: 'errors.media_not_ready',
+        code: "MEDIA_NOT_READY",
+        message_key: "errors.media_not_ready",
       });
     }
     const socialImage = translation.ogImageId
@@ -826,37 +852,38 @@ export class ProductReadService {
       : mainImage;
     if (!socialImage) {
       throw new ServiceUnavailableException({
-        code: 'MEDIA_NOT_READY', message_key: 'errors.media_not_ready',
+        code: "MEDIA_NOT_READY",
+        message_key: "errors.media_not_ready",
       });
     }
     const materials =
-      revision.materialsState === 'unknown'
+      revision.materialsState === "unknown"
         ? null
-        : revision.materialsState === 'none'
+        : revision.materialsState === "none"
           ? []
           : revision.from_RevisionMaterial_revisionId.map((entry) => ({
               material_code: entry.materialIdRelation.code,
               material_label:
-                locale === 'bg'
+                locale === "bg"
                   ? entry.materialIdRelation.labelBg
                   : entry.materialIdRelation.labelEn,
               fineness_code: entry.finenessIdRelation?.code ?? null,
               fineness_label: entry.finenessIdRelation
-                ? locale === 'bg'
+                ? locale === "bg"
                   ? entry.finenessIdRelation.labelBg
                   : entry.finenessIdRelation.labelEn
                 : null,
               gold_karat_code: entry.goldKaratIdRelation?.code ?? null,
             }));
     const gemstones =
-      revision.gemstonesState === 'unknown'
+      revision.gemstonesState === "unknown"
         ? null
-        : revision.gemstonesState === 'none'
+        : revision.gemstonesState === "none"
           ? []
           : revision.from_RevisionGemstone_revisionId.map((entry) => ({
               code: entry.gemstoneIdRelation.code,
               label:
-                locale === 'bg'
+                locale === "bg"
                   ? entry.gemstoneIdRelation.labelBg
                   : entry.gemstoneIdRelation.labelEn,
             }));
@@ -880,7 +907,7 @@ export class ProductReadService {
     });
     const relatedLinks = await transaction.productRelatedLink.findMany({
       where: { productId: data.product.id },
-      orderBy: { sortOrder: 'asc' },
+      orderBy: { sortOrder: "asc" },
       take: 50,
       select: { relatedProductId: true },
     });
@@ -897,6 +924,28 @@ export class ProductReadService {
       }
     }
 
+    const setLinks = await transaction.revisionSetProduct.findMany({
+      where: { revisionId: revision.id },
+      orderBy: { sortOrder: "asc" },
+      select: { relatedProductId: true },
+    });
+    const setCandidates = await this.catalogCandidates(
+      transaction,
+      setLinks.map((link) => link.relatedProductId),
+      locale,
+      context,
+    );
+    const setById = new Map(
+      setCandidates.map((candidate) => [
+        candidate.summary.id,
+        candidate.summary,
+      ]),
+    );
+    const completeTheSet = setLinks.flatMap((link) => {
+      const product = setById.get(link.relatedProductId);
+      return product ? [product] : [];
+    });
+
     return {
       ...summary,
       seo_title: translation.seoTitle,
@@ -908,6 +957,7 @@ export class ProductReadService {
       media,
       stock_choices: stockChoices,
       related_products: relatedProducts,
+      complete_the_set: completeTheSet,
       dates: {
         first_published_at:
           translation.firstPublishedAt?.toISOString() ??
@@ -928,24 +978,24 @@ export class ProductReadService {
     );
     if (!translation?.name) {
       throw new ServiceUnavailableException({
-        code: 'TEMPORARY_UNAVAILABLE',
-        message_key: 'errors.temporary_unavailable',
+        code: "TEMPORARY_UNAVAILABLE",
+        message_key: "errors.temporary_unavailable",
       });
     }
     const route = data.routes.get(locale);
     if (!route) {
       throw new ServiceUnavailableException({
-        code: 'ROUTE_CONFLICT',
-        message_key: 'errors.route_unavailable',
+        code: "ROUTE_CONFLICT",
+        message_key: "errors.route_unavailable",
       });
     }
     const primaryImageRow = data.revision.from_RevisionImage_revisionId.find(
-      (image) => image.assetIdRelation.role === 'main',
+      (image) => image.assetIdRelation.role === "main",
     );
     if (!primaryImageRow) {
       throw new ServiceUnavailableException({
-        code: 'MEDIA_NOT_READY',
-        message_key: 'errors.media_not_ready',
+        code: "MEDIA_NOT_READY",
+        message_key: "errors.media_not_ready",
       });
     }
     const primaryImage = projectMedia(
@@ -964,8 +1014,12 @@ export class ProductReadService {
     );
     const routes = new Map(data.routes);
     const specifications = readSpecifications(data.revision.specifications);
-    const dictionary = data.specificationDictionary ??
-      await readSpecificationDictionary(transaction, specifications ? [specifications] : []);
+    const dictionary =
+      data.specificationDictionary ??
+      (await readSpecificationDictionary(
+        transaction,
+        specifications ? [specifications] : [],
+      ));
     return {
       specifications: projectSpecifications(specifications, dictionary, locale),
       id: data.product.id,
@@ -974,11 +1028,11 @@ export class ProductReadService {
       locale,
       url: routeUrl(route, data.origin),
       alternate_urls: {
-        bg: routes.has('bg')
-          ? routeUrl(routes.get('bg') ?? '', data.origin)
+        bg: routes.has("bg")
+          ? routeUrl(routes.get("bg") ?? "", data.origin)
           : null,
-        en: routes.has('en')
-          ? routeUrl(routes.get('en') ?? '', data.origin)
+        en: routes.has("en")
+          ? routeUrl(routes.get("en") ?? "", data.origin)
           : null,
       },
       primary_image: primaryImage,

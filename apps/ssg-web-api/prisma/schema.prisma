@@ -345,6 +345,7 @@ model Product {
   from_Inquiry_productId                   Inquiry[]            @relation("Inquiry_productId")
   from_ProductRelatedLink_productId        ProductRelatedLink[] @relation("ProductRelatedLink_productId")
   from_ProductRelatedLink_relatedProductId ProductRelatedLink[] @relation("ProductRelatedLink_relatedProductId")
+  from_RevisionSetProduct_relatedProductId RevisionSetProduct[] @relation("RevisionSetProduct_relatedProductId")
 
   @@unique([ssgId])
   @@index([publicationStatus, productType])
@@ -398,6 +399,7 @@ model ProductRevision {
   from_RevisionMaterial_revisionId   RevisionMaterial[]   @relation("RevisionMaterial_revisionId")
   from_RevisionGemstone_revisionId   RevisionGemstone[]   @relation("RevisionGemstone_revisionId")
   from_RevisionImage_revisionId      RevisionImage[]      @relation("RevisionImage_revisionId")
+  from_RevisionSetProduct_revisionId RevisionSetProduct[] @relation("RevisionSetProduct_revisionId")
 
   @@unique([productId, revisionNumber])
   @@index([productId, state])
@@ -1180,4 +1182,17 @@ model ProductRelatedLink {
 
   @@unique([productId, relatedProductId])
   @@unique([productId, sortOrder])
+}
+
+model RevisionSetProduct {
+  id                       String          @id @default(uuid()) @db.Uuid
+  revisionId               String          @db.Uuid
+  relatedProductId         String          @db.Uuid
+  sortOrder                Int
+  revisionIdRelation       ProductRevision @relation("RevisionSetProduct_revisionId", fields: [revisionId], references: [id], onDelete: Restrict)
+  relatedProductIdRelation Product         @relation("RevisionSetProduct_relatedProductId", fields: [relatedProductId], references: [id], onDelete: Restrict)
+
+  @@unique([revisionId, relatedProductId])
+  @@unique([revisionId, sortOrder])
+  @@index([relatedProductId])
 }

@@ -161,11 +161,12 @@ export class StockPublicationService {
         },
       });
       if (source) {
-        const [translations, materials, gemstones, images] = await Promise.all([
+        const [translations, materials, gemstones, images, setProducts] = await Promise.all([
           tx.productTranslation.findMany({ where: { revisionId: source.id } }),
           tx.revisionMaterial.findMany({ where: { revisionId: source.id } }),
           tx.revisionGemstone.findMany({ where: { revisionId: source.id } }),
           tx.revisionImage.findMany({ where: { revisionId: source.id } }),
+          tx.revisionSetProduct.findMany({ where: { revisionId: source.id } }),
         ]);
         await tx.productTranslation.createMany({
           data: translations.map((row) => ({
@@ -202,6 +203,11 @@ export class StockPublicationService {
             revisionId: revision.id,
             assetId: row.assetId,
             sortOrder: row.sortOrder,
+          })),
+        });
+        await tx.revisionSetProduct.createMany({
+          data: setProducts.map((row) => ({
+            revisionId: revision.id, relatedProductId: row.relatedProductId, sortOrder: row.sortOrder,
           })),
         });
         await tx.productRevision.update({

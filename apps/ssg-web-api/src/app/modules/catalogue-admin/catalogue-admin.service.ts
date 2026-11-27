@@ -29,6 +29,9 @@ const REVISION_SELECT = {
   pickupLocationCodes: true, mediaReleaseId: true, changeReason: true, changeNote: true,
   mediaReleaseIdRelation: { select: { productId: true, approved: true } },
   from_ProductTranslation_revisionId: { select: TRANSLATIONS_SELECT },
+  from_RevisionSetProduct_revisionId: {
+    orderBy: { sortOrder: 'asc' }, select: { relatedProductId: true },
+  },
   from_RevisionMaterial_revisionId: {
     orderBy: { id: 'asc' },
     select: {
@@ -66,6 +69,7 @@ export async function cloneProductRevisionToDraft(
       from_RevisionMaterial_revisionId: true,
       from_RevisionGemstone_revisionId: true,
       from_RevisionImage_revisionId: true,
+      from_RevisionSetProduct_revisionId: true,
     },
   });
   if (!source || source.productId !== productId || source.state !== 'published') {
@@ -130,6 +134,11 @@ export async function cloneProductRevisionToDraft(
       },
     });
   }
+  await transaction.revisionSetProduct.createMany({
+    data: source.from_RevisionSetProduct_revisionId.map((link) => ({
+      revisionId: created.id, relatedProductId: link.relatedProductId, sortOrder: link.sortOrder,
+    })),
+  });
   return created;
 }
 
@@ -292,6 +301,7 @@ export class CatalogueAdminService {
     const bg = revision.from_ProductTranslation_revisionId.find((text) => text.locale === 'bg');
     const en = revision.from_ProductTranslation_revisionId.find((text) => text.locale === 'en');
     return {
+      related_set_product_ids: revision.from_RevisionSetProduct_revisionId.map((link) => link.relatedProductId),
       seo_translations: revision.from_ProductTranslation_revisionId.map((text) => ({
         locale: text.locale,
         seo_title: text.seoTitle,
